@@ -27,6 +27,11 @@ The `main` layout with its left sidebar replaced, top to bottom:
    spinner when one is only working. Every project is pinned until you
    change it: right-click a tile to unpin, right-click a project in the
    bottom strip to pin it back. No limit.
+   With projects on more than one machine, the tiles split into one block
+   per machine (this computer first), each under a small monitor/server icon,
+   the machine's name and its count; the project card's header names its
+   machine too. Rename machines with `"props": { "machines": { "local":
+   "MacBook Air", "cn": "Mac mini" } }` on the `arc-sidebar` block.
 3. **Other projects waiting on you**: up to four blocked or done agents from
    other projects, each with its project's mark. Click to jump there.
    Filtering to one project never hides work that needs you.

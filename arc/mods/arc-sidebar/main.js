@@ -42,7 +42,7 @@ const WORDS = {
     newSession: "New session in this project",
     older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
     settled: (n) => `Settled ${n}`, settledHint: "Settled sessions keep running; open to put them back",
-    others: (n) => `Other projects ${n}`,
+    others: (n) => `Other projects ${n}`, thisComputer: "This computer",
   },
   zh: {
     status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲" },
@@ -52,11 +52,15 @@ const WORDS = {
     newSession: "在这个项目里新开会话",
     older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
     settled: (n) => `已收起 ${n}`, settledHint: "收起的会话还在运行，点开可以放回列表",
-    others: (n) => `其他项目 ${n}`,
+    others: (n) => `其他项目 ${n}`, thisComputer: "本机",
   },
 };
 const W = () => WORDS[props()?.lang] ?? WORDS.en;
 const label = (status) => W().status[status];
+// A machine's name for people: props.machines can rename one, e.g. { "cn": "Mac mini", "local": "MacBook Air" }.
+const deviceName = (m) => props()?.machines?.[m ?? "local"] ?? m ?? W().thisComputer;
+const deviceIcon = (m) => `mods/workspace-chrome/${m ? "server" : "monitor"}.svg`;
+const multiDevice = (all) => new Set(all.map((s) => s.machine ?? null)).size > 1;
 
 function icon(p, size, color) {
   if (!p?.icon) return null;
@@ -130,16 +134,38 @@ export default class ArcSidebar extends View {
       .when(Boolean(dot), (el) => el.child(div().absolute().top(2).right(2).child(dot)));
   }
 
-  grid(t, pinnedSpaces, all) {
+  rows(t, list, all) {
     const rows = [];
-    const tiles = pinnedSpaces.map((s) => this.tile(t, s, all));
+    const tiles = list.map((s) => this.tile(t, s, all));
     for (let i = 0; i < tiles.length; i += COLUMNS) {
       const slice = tiles.slice(i, i + COLUMNS);
       const row = h_flex().gap(4).children(slice);
       for (let k = slice.length; k < COLUMNS; k++) row.child(div().flex_1());
       rows.push(row);
     }
-    return v_flex().gap(4).children(rows);
+    return rows;
+  }
+
+  // One block of tiles per machine (this computer first) once there are several.
+  grid(t, pinnedSpaces, all) {
+    if (!multiDevice(all)) return v_flex().gap(4).children(this.rows(t, pinnedSpaces, all));
+    const groups = new Map([[null, []]]);
+    for (const s of pinnedSpaces) {
+      const m = s.machine ?? null;
+      if (!groups.has(m)) groups.set(m, []);
+      groups.get(m).push(s);
+    }
+    const blocks = [];
+    for (const [m, list] of groups) {
+      if (!list.length) continue;
+      blocks.push(v_flex().gap(4)
+        .child(h_flex().h(16).px(2).gap(5).items_center().text_size(11).text_color(t.dim)
+          .child(svg(deviceIcon(m)).size(11).flex_none())
+          .child(div().truncate().child(deviceName(m)))
+          .child(div().text_color(t.dim).child(String(list.length))))
+        .children(this.rows(t, list, all)));
+    }
+    return v_flex().gap(10).children(blocks);
   }
 
   tabStatus(t, status) {
@@ -219,6 +245,9 @@ export default class ArcSidebar extends View {
     const head = h_flex().h(30).px(4).gap(8).items_center()
       .child(this.avatar(t, s, 18, 5))
       .child(div().flex_1().min_w(0).truncate().text_size(13.5).font_semibold().text_color(color).child(s.name))
+      .when(multiDevice(spaces()), (el) => el.child(h_flex().id("device").gap(3).items_center().text_size(11).text_color(t.dim)
+        .tooltip(deviceName(s.machine ?? null)).child(svg(deviceIcon(s.machine ?? null)).size(11))
+        .child(div().max_w(70).truncate().child(deviceName(s.machine ?? null)))))
       .when(Boolean(s.branch), (el) => el.child(h_flex().gap(3).items_center().text_size(11).text_color(t.dim)
         .child(svg("mods/workspace-chrome/git-branch.svg").size(11)).child(div().max_w(70).truncate().child(s.branch))))
       .child(div().id("new-tab").size(22).flex_none().rounded(6).flex().items_center().justify_center()
