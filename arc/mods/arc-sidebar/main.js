@@ -47,8 +47,8 @@ const WORDS = {
   en: {
     status: { blocked: "Needs you", done: "Done", working: "Working", idle: "Idle", auto: "Scheduled run done" },
     needsYou: "Needs you", unpinHint: "drag to reorder · right-click for more", pinHint: "right-click for more", renameHint: "double-click to rename · right-click for more", project: "Project",
-    more_: "More", ops: { stop: "Closing agent…", restart: "Restarting agent…", resume: "Resuming…" },
-    waiting: (n) => `Waiting in other projects ${n}`, more: (n) => `${n} more`,
+    more_: "More", rename: "Rename", ops: { stop: "Closing agent…", restart: "Restarting agent…", resume: "Resuming…" },
+    waiting: (n) => `${n} ${n === 1 ? "conversation" : "conversations"} waiting on you`, more: (n) => `${n} more`,
     newSession: "New session in this project",
     older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
     settled: (n) => `Settled ${n}`, settledHint: "Settled sessions keep running; open to put them back",
@@ -58,8 +58,8 @@ const WORDS = {
   zh: {
     status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲", auto: "定时任务已完成" },
     needsYou: "等你", unpinHint: "拖动排序 · 右键更多操作", pinHint: "右键更多操作", renameHint: "双击重命名 · 右键更多操作", project: "项目",
-    more_: "更多", ops: { stop: "正在关闭 Agent…", restart: "正在重启 Agent…", resume: "正在恢复对话…" },
-    waiting: (n) => `别的项目在等你 ${n}`, more: (n) => `还有 ${n} 个`,
+    more_: "更多", rename: "重命名", ops: { stop: "正在关闭 Agent…", restart: "正在重启 Agent…", resume: "正在恢复对话…" },
+    waiting: (n) => `${n} 个对话在等你`, more: (n) => `还有 ${n} 个`,
     newSession: "在这个项目里新开会话",
     older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
     settled: (n) => `已收起 ${n}`, settledHint: "收起的会话还在运行，点开可以放回列表",
@@ -296,9 +296,17 @@ export default class ArcSidebar extends View {
       .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}${doing ? " · " + doing : ""} (${W().pinHint})`)
       .on_click(() => run("tab.select", { id: tab.id }))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.tabMenu(tab, agent); })
+      .on_hover((on, cx) => { if (on) this.hoverTab = tab.id; else if (this.hoverTab === tab.id) this.hoverTab = null; cx.notify(); })
       .child(lead)
       .child(v_flex().flex_1().min_w(0).gap(1)
-        .child(div().truncate().text_size(13).text_color(tab.settled ? t.dim : t.foreground).child(tab.name))
+        .child(h_flex().min_w(0).gap(4).items_center()
+          .child(div().min_w(0).flex_shrink(1).truncate().text_size(13).text_color(tab.settled ? t.dim : t.foreground).child(tab.name))
+          // The pencil shows on the hovered row only, so a list of rows doesn't read as a list of pencils.
+          .when(this.hoverTab === tab.id, (el) => el.child(div().id(`rename-${tab.id}`).flex_none().size(18).rounded(4)
+            .flex().items_center().justify_center().text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+            .tooltip(W().rename).accessibility_label(W().rename)
+            .on_click((_e, cx) => { cx.stop_propagation(); run("tab.rename", { id: tab.id }); })
+            .child(svg("mods/workspace-chrome/square-pen.svg").size(12)))))
         .when(Boolean(doing), (el) => el.child(div().truncate().text_size(11.5).text_color(t.dim).child(doing))))
       .when(pinned, (el) => el.child(svg("mods/workspace-chrome/pin.svg").size(11).flex_none().text_color(color)))
       .when(Boolean(status), (el) => el.child(status))
@@ -332,7 +340,8 @@ export default class ArcSidebar extends View {
 
   // Agents waiting in other projects, so filtering never hides them.
   // A section title that folds its section; remembered with the machine folds in arc.folded.
-  sectionHead(t, key, text) {
+  // `count`, when given, is drawn highlighted where it appears in `text`.
+  sectionHead(t, key, text, count, tone) {
     const folded = shared("arc.folded") ?? [];
     const shut = folded.includes(key);
     return h_flex().id(`head-${key}`).h(20).px(2).gap(5).items_center().rounded(5).text_size(11).text_color(t.dim)
@@ -340,7 +349,17 @@ export default class ArcSidebar extends View {
       .tooltip(shut ? W().unfold : W().fold).accessibility_label(`${text} ${shut ? W().unfold : W().fold}`)
       .on_click((_e, cx) => { setShared("arc.folded", shut ? folded.filter((k) => k !== key) : [...folded, key]); cx.notify(); })
       .child(svg(`mods/workspace-chrome/chevron-${shut ? "right" : "down"}.svg`).size(10).flex_none())
-      .child(div().truncate().child(text));
+      .child(this.withCount(text, count, tone));
+  }
+
+  withCount(text, count, tone) {
+    const at = count == null ? -1 : text.indexOf(String(count));
+    if (at < 0) return div().truncate().child(text);
+    const n = String(count);
+    return h_flex().min_w(0).items_center()
+      .when(at > 0, (el) => el.child(div().flex_none().child(text.slice(0, at))))
+      .child(div().flex_none().font_semibold().text_color(tone).child(n))
+      .child(div().min_w(0).truncate().child(text.slice(at + n.length)));
   }
 
   folded(key) { return (shared("arc.folded") ?? []).includes(key); }
@@ -351,7 +370,7 @@ export default class ArcSidebar extends View {
       .sort((a, b) => rank(a) - rank(b) || b.seq - a.seq);
     if (!list.length) return null;
     const byId = Object.fromEntries(spaces().map((s) => [s.id, s]));
-    const head = this.sectionHead(t, "@waiting", W().waiting(list.length));
+    const head = this.sectionHead(t, "@waiting", W().waiting(list.length), list.length, t.blocked);
     if (this.folded("@waiting")) return head;
     const rows = list.slice(0, this.open.waitAll ? list.length : 4).map((a) => {
       const s = byId[a.space];

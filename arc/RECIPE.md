@@ -44,11 +44,13 @@ The `main` layout with its left sidebar replaced, top to bottom:
    agent come before plain terminals; pinned agents (`terminal.pin`) first of
    all. Under each agent's name a grey line says what it is doing now, from
    `agentnow.py`. Idle tabs untouched for 12 hours fold into **Older N**;
-   settled tabs into **Settled N**. Each row ends in **⋯** (right-click works too):
+   settled tabs into **Settled N**. Hovering a row shows a pencil after its
+   name (rename). Each row ends in **⋯**, the same menu as right-click: Rename,
    Restart agent, Close agent (keep terminal), Resume conversation (after a
-   close), Settle / Put back. A spinner stands in for ⋯ while one runs.
+   close), Settle / Put back, Delete terminal (`tab.close`, which asks first).
+   A spinner stands in for ⋯ while one runs.
 4. A spacer, then at the bottom:
-   - **Other projects waiting on you**: blocked or done agents elsewhere, with
+   - **N conversations waiting on you** (N highlighted): blocked or done agents elsewhere, with
      their project's name and how long ago they stopped. Click to jump there.
      Foldable; "N more" opens the rest.
    - **Other projects**: unpinned projects as small marks. Foldable.
