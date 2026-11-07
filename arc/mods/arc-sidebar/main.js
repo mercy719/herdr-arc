@@ -42,7 +42,7 @@ const WORDS = {
     newSession: "New session in this project",
     older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
     settled: (n) => `Settled ${n}`, settledHint: "Settled sessions keep running; open to put them back",
-    others: (n) => `Other projects ${n}`, thisComputer: "This computer",
+    others: (n) => `Other projects ${n}`, thisComputer: "This computer", fold: "Fold", unfold: "Unfold",
   },
   zh: {
     status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲" },
@@ -52,7 +52,7 @@ const WORDS = {
     newSession: "在这个项目里新开会话",
     older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
     settled: (n) => `已收起 ${n}`, settledHint: "收起的会话还在运行，点开可以放回列表",
-    others: (n) => `其他项目 ${n}`, thisComputer: "本机",
+    others: (n) => `其他项目 ${n}`, thisComputer: "本机", fold: "折叠", unfold: "展开",
   },
 };
 const W = () => WORDS[props()?.lang] ?? WORDS.en;
@@ -155,17 +155,31 @@ export default class ArcSidebar extends View {
       if (!groups.has(m)) groups.set(m, []);
       groups.get(m).push(s);
     }
+    const folded = shared("arc.folded") ?? [];
     const blocks = [];
     for (const [m, list] of groups) {
       if (!list.length) continue;
-      blocks.push(v_flex().gap(4)
-        .child(h_flex().h(16).px(2).gap(5).items_center().text_size(11).text_color(t.dim)
-          .child(svg(deviceIcon(m)).size(11).flex_none())
-          .child(div().truncate().child(deviceName(m)))
-          .child(div().text_color(t.dim).child(String(list.length))))
-        .children(this.rows(t, list, all)));
+      const key = m ?? "local";
+      const shut = folded.includes(key);
+      // A folded machine still says how many of its agents need you.
+      const ids = new Set(list.map((s) => s.id));
+      const mine = agents().filter((a) => ids.has(a.space));
+      const blocked = mine.filter((a) => a.status === "blocked").length;
+      const done = mine.filter((a) => a.status === "done").length;
+      const n = blocked || done;
+      const head = h_flex().id(`device-${key}`).h(20).px(2).gap(5).items_center().rounded(5).text_size(11).text_color(t.dim)
+        .hover((st) => st.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+        .tooltip(shut ? W().unfold : W().fold).accessibility_label(`${deviceName(m)} ${shut ? W().unfold : W().fold}`)
+        .on_click((_e, cx) => { setShared("arc.folded", shut ? folded.filter((k) => k !== key) : [...folded, key]); cx.notify(); })
+        .child(svg(`mods/workspace-chrome/chevron-${shut ? "right" : "down"}.svg`).size(10).flex_none())
+        .child(svg(deviceIcon(m)).size(11).flex_none())
+        .child(div().truncate().child(deviceName(m)))
+        .child(div().child(String(list.length)))
+        .when(shut && n > 0, (el) => el.child(h_flex().h(14).min_w(14).px(n > 9 ? 3 : 0).rounded_full()
+          .bg(blocked ? t.blocked : t.done).items_center().justify_center().text_size(9).font_bold().text_color("#ffffff").child(String(n))));
+      blocks.push(v_flex().gap(4).child(head).when(!shut, (el) => el.children(this.rows(t, list, all))));
     }
-    return v_flex().gap(10).children(blocks);
+    return v_flex().gap(6).children(blocks);
   }
 
   tabStatus(t, status) {

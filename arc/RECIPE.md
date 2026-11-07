@@ -29,7 +29,9 @@ The `main` layout with its left sidebar replaced, top to bottom:
    bottom strip to pin it back. No limit.
    With projects on more than one machine, the tiles split into one block
    per machine (this computer first), each under a small monitor/server icon,
-   the machine's name and its count; the project card's header names its
+   the machine's name and its count. Click a machine's heading to fold it
+   (kept in `shared("arc.folded")`); folded, it still shows how many of its
+   agents need you. the project card's header names its
    machine too. Rename machines with `"props": { "machines": { "local":
    "MacBook Air", "cn": "Mac mini" } }` on the `arc-sidebar` block.
 3. **Other projects waiting on you**: up to four blocked or done agents from
