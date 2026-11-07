@@ -35,14 +35,20 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "arc-chrome"
+            "mod": "arc-chrome",
+            "props": {
+              "lang": "en"
+            }
           }
         },
         {
           "id": "projects",
           "type": "block",
           "content": {
-            "mod": "arc-sidebar"
+            "mod": "arc-sidebar",
+            "props": {
+              "lang": "en"
+            }
           }
         },
         {

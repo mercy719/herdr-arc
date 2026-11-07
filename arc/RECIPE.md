@@ -7,10 +7,12 @@ less to read.
 ![Arc](preview.png)
 
 This file is the brief: enough to build Arc from an empty folder. The files
-next to it are one build of it. The sidebar's own words are in Chinese
-(等你 = needs you, 别的项目在等你 = other projects waiting on you, 较早 =
-older, 已收起 = settled); swap the strings in `mods/arc-sidebar/main.js`
-for your language.
+next to it are one build of it.
+
+The sidebar speaks English or Chinese. Mods can't see the system language,
+so the layout picks it: `"props": { "lang": "zh" }` on the `arc-sidebar` and
+`arc-chrome` blocks in `layouts/arc.json` (`"en"` is the default).
+[中文界面截图](preview-zh.png)
 
 ## What you see
 
@@ -30,11 +32,11 @@ The `main` layout with its left sidebar replaced, top to bottom:
    Filtering to one project never hides work that needs you.
 4. **The project card**, tinted in the project's color: its name and branch,
    + new session, then one row per tab with the agent's icon, its name and
-   status (spinner, 等你 badge, or done dot) and a settle button.
+   status (spinner, Needs you badge, or done dot) and a settle button.
    - Pinned agents (`terminal.pin`) come first, like Arc's Pinned over Today.
-   - Idle tabs untouched for 12 hours fold into **较早 N** (only folded,
+   - Idle tabs untouched for 12 hours fold into **Older N** (only folded,
      never closed).
-   - Settled tabs fold into **已收起 N**. Nothing is settled automatically:
+   - Settled tabs fold into **Settled N**. Nothing is settled automatically:
      working or waiting agents stay in the list.
 5. **Other projects**: unpinned projects as small marks along the bottom,
    ones that need you first. Empty while everything is pinned.

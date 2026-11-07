@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
-import { spaces, agents, run, theme, shared, setShared } from "herdr";
+import { spaces, agents, run, theme, shared, setShared, props } from "herdr";
 
 // Same table as the shipped `spaces` mod, so a project has one color everywhere.
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
@@ -32,7 +32,31 @@ function fill(t, space) {
 }
 
 const initial = (name) => ([...(name ?? "")][0] ?? "?").toUpperCase();
-const LABEL = { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲" };
+// Words in both languages; the layout picks one with "props": { "lang": "zh" } (default "en").
+const WORDS = {
+  en: {
+    status: { blocked: "Needs you", done: "Done", working: "Working", idle: "Idle" },
+    needsYou: "Needs you", unpinHint: "right-click to unpin", pinHint: "right-click to pin", project: "Project",
+    putBack: "Put back in the list", settle: "Settle (keeps running)",
+    waiting: (n) => `Waiting in other projects ${n}`, more: (n) => `${n} more`,
+    newSession: "New session in this project",
+    older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
+    settled: (n) => `Settled ${n}`, settledHint: "Settled sessions keep running; open to put them back",
+    others: (n) => `Other projects ${n}`,
+  },
+  zh: {
+    status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲" },
+    needsYou: "等你", unpinHint: "右键取消置顶", pinHint: "右键置顶", project: "项目",
+    putBack: "放回列表", settle: "收起（继续运行）",
+    waiting: (n) => `别的项目在等你 ${n}`, more: (n) => `还有 ${n} 个`,
+    newSession: "在这个项目里新开会话",
+    older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
+    settled: (n) => `已收起 ${n}`, settledHint: "收起的会话还在运行，点开可以放回列表",
+    others: (n) => `其他项目 ${n}`,
+  },
+};
+const W = () => WORDS[props()?.lang] ?? WORDS.en;
+const label = (status) => W().status[status];
 
 function icon(p, size, color) {
   if (!p?.icon) return null;
@@ -97,8 +121,8 @@ export default class ArcSidebar extends View {
     return v_flex().id(`tile-${s.id}`).flex_1().min_w(0).h(46).rounded(8).gap(3).items_center().justify_center().relative()
       .bg(s.active ? color + "2e" : t.raised).border(1).border_color(s.active ? color : t.border)
       .hover((st) => st.bg(s.active ? color + "3a" : t.hover)).cursor_pointer()
-      .tooltip(`${s.name}${s.status ? " · " + LABEL[s.status] : ""}（右键取消置顶）`)
-      .accessibility_label(`项目 ${s.name}`)
+      .tooltip(`${s.name}${s.status ? " · " + label(s.status) : ""} (${W().unpinHint})`)
+      .accessibility_label(`${W().project} ${s.name}`)
       .on_click(() => run("space.select", { id: s.id }))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.togglePin(s.id, all); })
       .child(this.avatar(t, s, 20, 6))
@@ -120,7 +144,7 @@ export default class ArcSidebar extends View {
 
   tabStatus(t, status) {
     if (status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900);
-    if (status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("等你");
+    if (status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child(W().needsYou);
     if (status === "done") return div().size(7).mx(3).flex_none().rounded_full().bg(t.done);
     return null;
   }
@@ -135,7 +159,7 @@ export default class ArcSidebar extends View {
       .bg(tab.active ? t.background : color + "00")
       .when(tab.active, (el) => el.border(1).border_color(color + "55"))
       .hover((st) => st.bg(tab.active ? t.background : t.hover)).cursor_pointer()
-      .tooltip(`${tab.name}${tab.status ? " · " + LABEL[tab.status] : ""}`)
+      .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}`)
       .on_click(() => run("tab.select", { id: tab.id }))
       .child(lead)
       .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(tab.settled ? t.dim : t.foreground).child(tab.name))
@@ -143,7 +167,7 @@ export default class ArcSidebar extends View {
       .when(Boolean(status), (el) => el.child(status))
       .child(div().id(`settle-${tab.id}`).flex_none().size(20).rounded(5).flex().items_center().justify_center()
         .text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-        .tooltip(tab.settled ? "放回列表" : "收起（继续运行）")
+        .tooltip(tab.settled ? W().putBack : W().settle)
         .on_click((_e, cx) => { cx.stop_propagation(); run(tab.settled ? "tab.unsettle" : "tab.settle", { id: tab.id }); })
         .child(svg(`mods/workspace-chrome/${tab.settled ? "chevron-left" : "archive"}.svg`).size(12)));
   }
@@ -167,7 +191,7 @@ export default class ArcSidebar extends View {
       const s = byId[a.space];
       return h_flex().id(`wait-${a.address}`).h(28).px(6).gap(8).items_center().rounded(7)
         .hover((st) => st.bg(t.hover)).cursor_pointer()
-        .tooltip(`${a.space_name} · ${a.tab_name} · ${LABEL[a.status]}`)
+        .tooltip(`${a.space_name} · ${a.tab_name} · ${label(a.status)}`)
         .on_click(() => run("agent.focus", { terminal: a.address }))
         .when(Boolean(s), (el) => el.child(this.avatar(t, s, 16, 4)))
         .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(a.tab_name))
@@ -175,9 +199,9 @@ export default class ArcSidebar extends View {
     });
     const more = list.length - rows.length;
     return v_flex().gap(1)
-      .child(div().px(2).pb(2).text_size(11).text_color(t.dim).child(`别的项目在等你 ${list.length}`))
+      .child(div().px(2).pb(2).text_size(11).text_color(t.dim).child(W().waiting(list.length)))
       .children(rows)
-      .when(more > 0, (el) => el.child(div().px(8).text_size(11).text_color(t.dim).child(`还有 ${more} 个`)));
+      .when(more > 0, (el) => el.child(div().px(8).text_size(11).text_color(t.dim).child(W().more(more))));
   }
 
   card(t, s) {
@@ -198,16 +222,16 @@ export default class ArcSidebar extends View {
       .when(Boolean(s.branch), (el) => el.child(h_flex().gap(3).items_center().text_size(11).text_color(t.dim)
         .child(svg("mods/workspace-chrome/git-branch.svg").size(11)).child(div().max_w(70).truncate().child(s.branch))))
       .child(div().id("new-tab").size(22).flex_none().rounded(6).flex().items_center().justify_center()
-        .text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip("在这个项目里新开会话")
+        .text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(W().newSession)
         .on_click(() => run("tab.new", { space: s.id })).child(svg("mods/workspace-chrome/plus.svg").size(14)));
     const body = v_flex().gap(2).children(open.map((tab) => this.tabRow(t, s, tab, color, byTab)));
     const card = v_flex().p(6).gap(4).rounded(12).bg(color + "1c").border(1).border_color(color + "40").child(head).child(body);
     if (older.length) {
-      card.child(this.fold(t, "older", `较早 ${older.length}`, "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起"));
+      card.child(this.fold(t, "older", W().older(older.length), W().olderHint));
       if (this.open.older) card.child(v_flex().gap(2).children(older.map((tab) => this.tabRow(t, s, tab, color, byTab))));
     }
     if (settled.length) {
-      card.child(this.fold(t, "settled", `已收起 ${settled.length}`, "收起的会话还在运行，点开可以放回列表"));
+      card.child(this.fold(t, "settled", W().settled(settled.length), W().settledHint));
       if (this.open.settled) card.child(v_flex().gap(2).children(settled.map((tab) => this.tabRow(t, s, tab, color, byTab))));
     }
     return card;
@@ -219,15 +243,15 @@ export default class ArcSidebar extends View {
       const dot = this.badge(t, s, 13);
       return div().id(`other-${s.id}`).relative().flex_none().rounded(7).p(2)
         .when(s.active, (el) => el.border(1.5).border_color(fill(t, s)))
-        .tooltip(`${s.name}${s.status ? " · " + LABEL[s.status] : ""}（右键置顶）`)
-        .accessibility_label(`项目 ${s.name}`)
+        .tooltip(`${s.name}${s.status ? " · " + label(s.status) : ""} (${W().pinHint})`)
+        .accessibility_label(`${W().project} ${s.name}`)
         .cursor_pointer().on_click(() => run("space.select", { id: s.id }))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.togglePin(s.id, all); })
         .child(this.avatar(t, s, 22, 6))
         .when(Boolean(dot), (el) => el.child(div().absolute().top(-3).right(-3).child(dot)));
     });
     return v_flex().gap(6)
-      .child(div().px(2).text_size(11).text_color(t.dim).child(`其他项目 ${others.length}`))
+      .child(div().px(2).text_size(11).text_color(t.dim).child(W().others(others.length)))
       .child(h_flex().flex_wrap().gap(4).children(dots));
   }
 
