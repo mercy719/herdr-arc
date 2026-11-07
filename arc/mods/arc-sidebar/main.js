@@ -5,7 +5,8 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
-import { spaces, agents, run, theme, shared, setShared, props, settings } from "herdr";
+import { spaces, agents, run, theme, shared, setShared, props, settings, exec, appHome } from "herdr";
+import { openMenu, renderMenu, watchIconPicks, customIcon } from "./menu.js";
 
 // Same table as the shipped `spaces` mod, so a project has one color everywhere.
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
@@ -14,8 +15,15 @@ const RANK = { blocked: 0, done: 1, working: 2, idle: 3 };
 // Optional project logos: put a PNG in mods/arc-sidebar/logos/ and list the
 // space name here, e.g. { "my-app": "my-app" } for logos/my-app.png. Only listed
 // names get an image: a missing file draws blank instead of the initial.
+// (Anyone can also pick an icon per project from its right-click menu.)
 const LOGOS = {};
 // Tiles stay about this wide; the column count follows the sidebar width.
+// agentnow.py (beside this file) says what each agent is doing; it is rerun this often.
+const NOW_EVERY_S = 20;
+// Done is green across the sidebar; the theme's ansi green reads grey at dot size.
+const DONE_GREEN = "#34c759";
+// agentnow.py marks an agent whose latest turn was a scheduled wakeup.
+const isAuto = (agent) => Boolean(agent && shared("agent.now")?.[agent.address]?.auto);
 const TILE_MIN = 56, GAP = 4, PAD_X = 8;
 const columnsFor = (w) => Math.max(2, Math.min(8, Math.floor((w - 2 * PAD_X + GAP) / (TILE_MIN + GAP))));
 const OLDER_MS = 12 * 3600 * 1000;
@@ -37,24 +45,26 @@ const initial = (name) => ([...(name ?? "")][0] ?? "?").toUpperCase();
 // Words in both languages; the layout picks one with "props": { "lang": "zh" } (default "en").
 const WORDS = {
   en: {
-    status: { blocked: "Needs you", done: "Done", working: "Working", idle: "Idle" },
-    needsYou: "Needs you", unpinHint: "right-click to unpin", pinHint: "right-click to pin", project: "Project",
+    status: { blocked: "Needs you", done: "Done", working: "Working", idle: "Idle", auto: "Scheduled run done" },
+    needsYou: "Needs you", unpinHint: "drag to reorder · right-click for more", pinHint: "right-click for more", renameHint: "double-click to rename · right-click for more", project: "Project",
     putBack: "Put back in the list", settle: "Settle (keeps running)",
     waiting: (n) => `Waiting in other projects ${n}`, more: (n) => `${n} more`,
     newSession: "New session in this project",
     older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
     settled: (n) => `Settled ${n}`, settledHint: "Settled sessions keep running; open to put them back",
     others: (n) => `Other projects ${n}`, thisComputer: "This computer", fold: "Fold", unfold: "Unfold",
+    ago: (ms) => ms < 60e3 ? "now" : ms < 3600e3 ? `${Math.floor(ms / 60e3)}m ago` : ms < 86400e3 ? `${Math.floor(ms / 3600e3)}h ago` : `${Math.floor(ms / 86400e3)}d ago`,
   },
   zh: {
-    status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲" },
-    needsYou: "等你", unpinHint: "右键取消置顶", pinHint: "右键置顶", project: "项目",
+    status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲", auto: "定时任务已完成" },
+    needsYou: "等你", unpinHint: "拖动排序 · 右键更多操作", pinHint: "右键更多操作", renameHint: "双击重命名 · 右键更多操作", project: "项目",
     putBack: "放回列表", settle: "收起（继续运行）",
     waiting: (n) => `别的项目在等你 ${n}`, more: (n) => `还有 ${n} 个`,
     newSession: "在这个项目里新开会话",
     older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
     settled: (n) => `已收起 ${n}`, settledHint: "收起的会话还在运行，点开可以放回列表",
     others: (n) => `其他项目 ${n}`, thisComputer: "本机", fold: "折叠", unfold: "展开",
+    ago: (ms) => ms < 60e3 ? "刚刚" : ms < 3600e3 ? `${Math.floor(ms / 60e3)} 分钟前` : ms < 86400e3 ? `${Math.floor(ms / 3600e3)} 小时前` : `${Math.floor(ms / 86400e3)} 天前`,
   },
 };
 const W = () => WORDS[props()?.lang] ?? WORDS.en;
@@ -70,10 +80,35 @@ function icon(p, size, color) {
 }
 
 export default class ArcSidebar extends View {
-  init() {
+  init(_props, cx) {
+    if (props()?.menuFor) { this.menu = true; return; }
+    watchIconPicks(this, cx);
+    this.watchNow(cx);
     this.open = { older: false, settled: false };
     this.columns = 4;
+    this.pressed = this.over = null;
   }
+
+  // One line per agent from agentnow.py into shared("agent.now"), for this list and the board.
+  watchNow(cx) {
+    const script = `${appHome()}/mods/arc-sidebar/agentnow.py`;
+    cx.spawn(async () => {
+      while (!this.closed) {
+        const r = await exec("python3", ["-I", "-S", script]).catch(() => null);
+        if (this.closed) return;
+        if (r?.code === 0) {
+          try {
+            const agents = JSON.parse(r.stdout).agents ?? {};
+            const seen = JSON.stringify(agents);
+            if (seen !== this.nowSeen) { this.nowSeen = seen; setShared("agent.now", agents); }
+          } catch { /* a bad run keeps the last lines */ }
+        }
+        await exec("sleep", [String(NOW_EVERY_S)]).catch(() => null);
+      }
+    });
+  }
+
+  async close() { this.closed = true; }
 
   // Pinned ids, in order; until you unpin one, every project (new ones too).
   pinned(all) {
@@ -89,6 +124,20 @@ export default class ArcSidebar extends View {
     setShared("arc.pinned", next);
   }
 
+  // Dragging toward the end of the list drops after the target, else before it.
+  dragForward(all, target) {
+    const order = this.pinned(all);
+    return order.indexOf(this.pressed) < order.indexOf(target);
+  }
+
+  move(all, from, target) {
+    const order = this.pinned(all);
+    const forward = order.indexOf(from) < order.indexOf(target);
+    const next = order.filter((id) => id !== from);
+    next.splice(next.indexOf(target) + (forward ? 1 : 0), 0, from);
+    setShared("arc.pinned", next);
+  }
+
   statusDot(t, status, size = 8) {
     if (status === "blocked" || status === "done") {
       return div().size(size).flex_none().rounded_full().bg(t[status]).border(1.5).border_color(t.chrome);
@@ -100,26 +149,35 @@ export default class ArcSidebar extends View {
   }
 
   avatar(t, s, size, radius) {
-    if (!LOGOS[s.name]) {
+    const custom = customIcon(s.id);
+    if (!custom && !LOGOS[s.name]) {
       return h_flex().size(size).flex_none().rounded(radius).bg(fill(t, s)).items_center().justify_center()
         .text_size(Math.round(size * 0.48)).font_bold().text_color("#ffffff").child(initial(s.name));
     }
     return Avatar.new().w(size).h(size).flex_none().rounded(radius).overflow_hidden()
-      .image(AvatarImage.new(`mods/arc-sidebar/logos/${LOGOS[s.name]}.png`).size_full())
+      .image(AvatarImage.new(custom ?? `mods/arc-sidebar/logos/${LOGOS[s.name]}.png`).size_full())
       .fallback(AvatarFallback.new().size_full().bg(fill(t, s)).items_center().justify_center()
         .text_size(Math.round(size * 0.48)).font_bold().text_color("#ffffff").child(initial(s.name)));
   }
 
-  // How many of a project's agents want you: waiting first, else finished unseen.
+  // A light per project: red blinks (an agent has a question), green holds (one finished
+  // while you were away), amber blinks (still working). Needing you outranks working.
   badge(t, s, size) {
     const mine = agents().filter((a) => a.space === s.id);
-    const blocked = mine.filter((a) => a.status === "blocked").length;
-    const done = mine.filter((a) => a.status === "done").length;
-    const n = blocked || done;
-    if (!n) return s.status === "working" ? this.statusDot(t, "working", size - 6) : null;
-    const color = blocked ? t.blocked : t.done;
-    return h_flex().h(size).min_w(size).px(n > 9 ? 3 : 0).flex_none().rounded_full().bg(color).border(1.5).border_color(t.chrome)
-      .items_center().justify_center().text_size(size * 0.62).font_bold().text_color("#ffffff").child(String(n));
+    const has = (status) => mine.some((a) => a.status === status) || s.status === status;
+    // A finished scheduled run (a /loop or cron wakeup) is blue: worth a glance, not a reply. It ranks under working.
+    const doneBy = (auto) => mine.some((a) => a.status === "done" && isAuto(a) === auto);
+    const green = t.success ?? DONE_GREEN;
+    const [color, period, label] = has("blocked") ? [t.blocked, 700, "blocked"]
+      : doneBy(false) ? [green, 0, "done"]
+      : has("working") ? [t.working, 1100, "working"]
+      : doneBy(true) ? [t.done, 0, "auto"]
+      : has("done") ? [green, 0, "done"] : [];
+    if (!color) return null;
+    const d = Math.round(size * 0.64);
+    return div().size(d).flex_none().rounded_full().bg(color).border(1.5).border_color(t.chrome)
+      .accessibility_label(W().status[label] ?? label)
+      .when(period > 0, (el) => el.loop("opacity", { from: 0.2, to: 1, period }));
   }
 
   tile(t, s, all) {
@@ -130,11 +188,30 @@ export default class ArcSidebar extends View {
       .hover((st) => st.bg(s.active ? color + "3a" : t.hover)).cursor_pointer()
       .tooltip(`${s.name}${s.status ? " · " + label(s.status) : ""} (${W().unpinHint})`)
       .accessibility_label(`${W().project} ${s.name}`)
-      .on_click(() => run("space.select", { id: s.id }))
-      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.togglePin(s.id, all); })
+      // Press and drag onto another tile of the same machine to reorder; a plain click selects.
+      .when(this.pressed === s.id && this.over && this.over !== s.id, (el) => el.opacity(0.45))
+      .when(Boolean(this.pressed) && this.over === s.id && this.pressed !== s.id, (el) => el.child(
+        div().absolute().top(4).bottom(4).w(2).rounded(1).bg(t.accent)
+          .when(this.dragForward(all, s.id), (line) => line.right(-3))
+          .when(!this.dragForward(all, s.id), (line) => line.left(-3))))
+      .on_mouse_down("left", () => { this.pressed = s.id; this.over = s.id; })
+      .on_mouse_move((_e, cx) => {
+        if (!this.pressed) return;
+        const from = all.find((x) => x.id === this.pressed);
+        const over = from && (from.machine ?? null) === (s.machine ?? null) ? s.id : null;
+        if (this.over !== over) { this.over = over; cx.notify(); }
+      })
+      .on_mouse_up("left", (_e, cx) => {
+        const from = this.pressed, over = this.over;
+        this.pressed = this.over = null;
+        if (from && over === s.id && from !== s.id) this.move(all, from, s.id);
+        else if (from === s.id) run("space.select", { id: s.id });
+        cx.notify();
+      })
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(s); })
       .child(this.avatar(t, s, 20, 6))
       .child(div().w_full().px(4).text_size(9.5).text_center().truncate().text_color(s.active ? t.foreground : t.muted).child(s.name))
-      .when(Boolean(dot), (el) => el.child(div().absolute().top(2).right(2).child(dot)));
+      .when(Boolean(dot), (el) => el.child(div().absolute().top(4).right(4).child(dot)));
   }
 
   rows(t, list, all) {
@@ -180,16 +257,16 @@ export default class ArcSidebar extends View {
         .child(div().truncate().child(deviceName(m)))
         .child(div().child(String(list.length)))
         .when(shut && n > 0, (el) => el.child(h_flex().h(14).min_w(14).px(n > 9 ? 3 : 0).rounded_full()
-          .bg(blocked ? t.blocked : t.done).items_center().justify_center().text_size(9).font_bold().text_color("#ffffff").child(String(n))));
+          .bg(blocked ? t.blocked : (t.success ?? DONE_GREEN)).items_center().justify_center().text_size(9).font_bold().text_color("#ffffff").child(String(n))));
       blocks.push(v_flex().gap(4).child(head).when(!shut, (el) => el.children(this.rows(t, list, all))));
     }
     return v_flex().gap(6).children(blocks);
   }
 
-  tabStatus(t, status) {
+  tabStatus(t, status, auto = false) {
     if (status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900);
     if (status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child(W().needsYou);
-    if (status === "done") return div().size(7).mx(3).flex_none().rounded_full().bg(t.done);
+    if (status === "done") return div().size(7).mx(3).flex_none().rounded_full().bg(auto ? t.done : (t.success ?? DONE_GREEN));
     return null;
   }
 
@@ -197,16 +274,19 @@ export default class ArcSidebar extends View {
     const agent = byTab[tab.id];
     const pic = agent ? icon(agent.program, 15, t.foreground) : null;
     const lead = pic ?? svg("mods/workspace-chrome/terminal.svg").size(14).flex_none().text_color(t.dim);
-    const status = this.tabStatus(t, tab.status);
+    const status = this.tabStatus(t, tab.status, isAuto(agent));
     const pinned = Boolean(agent?.pinned);
-    return h_flex().id(`tab-${tab.id}`).h(32).px(8).gap(9).items_center().rounded(8)
+    const doing = agent ? shared("agent.now")?.[agent.address]?.now : null;
+    return h_flex().id(`tab-${tab.id}`).h(doing ? 42 : 32).px(8).gap(9).items_center().rounded(8)
       .bg(tab.active ? t.background : color + "00")
       .when(tab.active, (el) => el.border(1).border_color(color + "55"))
       .hover((st) => st.bg(tab.active ? t.background : t.hover)).cursor_pointer()
-      .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}`)
+      .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}${doing ? " · " + doing : ""}`)
       .on_click(() => run("tab.select", { id: tab.id }))
       .child(lead)
-      .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(tab.settled ? t.dim : t.foreground).child(tab.name))
+      .child(v_flex().flex_1().min_w(0).gap(1)
+        .child(div().truncate().text_size(13).text_color(tab.settled ? t.dim : t.foreground).child(tab.name))
+        .when(Boolean(doing), (el) => el.child(div().truncate().text_size(11.5).text_color(t.dim).child(doing))))
       .when(pinned, (el) => el.child(svg("mods/workspace-chrome/pin.svg").size(11).flex_none().text_color(color)))
       .when(Boolean(status), (el) => el.child(status))
       .child(div().id(`settle-${tab.id}`).flex_none().size(20).rounded(5).flex().items_center().justify_center()
@@ -225,27 +305,49 @@ export default class ArcSidebar extends View {
   }
 
   // Agents waiting in other projects, so filtering never hides them.
+  // A section title that folds its section; remembered with the machine folds in arc.folded.
+  sectionHead(t, key, text) {
+    const folded = shared("arc.folded") ?? [];
+    const shut = folded.includes(key);
+    return h_flex().id(`head-${key}`).h(20).px(2).gap(5).items_center().rounded(5).text_size(11).text_color(t.dim)
+      .hover((st) => st.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+      .tooltip(shut ? W().unfold : W().fold).accessibility_label(`${text} ${shut ? W().unfold : W().fold}`)
+      .on_click((_e, cx) => { setShared("arc.folded", shut ? folded.filter((k) => k !== key) : [...folded, key]); cx.notify(); })
+      .child(svg(`mods/workspace-chrome/chevron-${shut ? "right" : "down"}.svg`).size(10).flex_none())
+      .child(div().truncate().child(text));
+  }
+
+  folded(key) { return (shared("arc.folded") ?? []).includes(key); }
+
   waiting(t, active) {
-    const rank = { blocked: 0, done: 1 };
+    const rank = (a) => (a.status === "blocked" ? 0 : isAuto(a) ? 2 : 1);
     const list = agents().filter((a) => a.space !== active?.id && (a.status === "blocked" || a.status === "done"))
-      .sort((a, b) => rank[a.status] - rank[b.status] || b.seq - a.seq);
+      .sort((a, b) => rank(a) - rank(b) || b.seq - a.seq);
     if (!list.length) return null;
     const byId = Object.fromEntries(spaces().map((s) => [s.id, s]));
-    const rows = list.slice(0, 4).map((a) => {
+    const head = this.sectionHead(t, "@waiting", W().waiting(list.length));
+    if (this.folded("@waiting")) return head;
+    const rows = list.slice(0, this.open.waitAll ? list.length : 4).map((a) => {
       const s = byId[a.space];
+      // When it stopped to wait or finished: the tab's last status change.
+      const at = s?.tabs?.find((tab) => tab.id === a.tab)?.changed_at ?? null;
       return h_flex().id(`wait-${a.address}`).h(28).px(6).gap(8).items_center().rounded(7)
         .hover((st) => st.bg(t.hover)).cursor_pointer()
         .tooltip(`${a.space_name} · ${a.tab_name} · ${label(a.status)}`)
         .on_click(() => run("agent.focus", { terminal: a.address }))
         .when(Boolean(s), (el) => el.child(this.avatar(t, s, 16, 4)))
-        .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(a.tab_name))
-        .child(this.tabStatus(t, a.status));
+        .child(h_flex().flex_1().min_w(0).gap(6).items_baseline()
+          .child(div().flex_shrink(1).min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(a.tab_name))
+          .child(div().flex_shrink(1).min_w(0).truncate().text_size(11).text_color(t.dim).child(a.space_name)))
+        .when(Boolean(at), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(W().ago(Date.now() - at))))
+        .child(this.tabStatus(t, a.status, isAuto(a)));
     });
     const more = list.length - rows.length;
-    return v_flex().gap(1)
-      .child(div().px(2).pb(2).text_size(11).text_color(t.dim).child(W().waiting(list.length)))
-      .children(rows)
-      .when(more > 0, (el) => el.child(div().px(8).text_size(11).text_color(t.dim).child(W().more(more))));
+    return v_flex().gap(1).child(head).children(rows)
+      .when(more > 0, (el) => el.child(div().id("wait-more").px(8).h(20).flex().items_center().rounded(5).text_size(11).text_color(t.dim)
+        .hover((st) => st.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+        .on_click((_e, cx) => { this.open.waitAll = true; cx.notify(); })
+        .child(W().more(more))));
   }
 
   card(t, s) {
@@ -257,12 +359,18 @@ export default class ArcSidebar extends View {
     const live = s.tabs.filter((tab) => !tab.settled);
     const isPinned = (tab) => Boolean(byTab[tab.id]?.pinned);
     // Arc's Pinned above Today: pinned agents first, then the rest in their order.
-    const open = [...live.filter(isPinned), ...live.filter((tab) => !isPinned(tab) && !quiet(tab))];
+    // Within each, tabs running a coding agent come before plain terminals.
+    const agentFirst = (list) => [...list.filter((tab) => byTab[tab.id]), ...list.filter((tab) => !byTab[tab.id])];
+    const open = [...agentFirst(live.filter(isPinned)), ...agentFirst(live.filter((tab) => !isPinned(tab) && !quiet(tab)))];
     const older = live.filter((tab) => !isPinned(tab) && quiet(tab));
     const settled = s.tabs.filter((tab) => tab.settled);
     const head = h_flex().h(30).px(4).gap(8).items_center()
       .child(this.avatar(t, s, 18, 5))
-      .child(div().flex_1().min_w(0).truncate().text_size(13.5).font_semibold().text_color(color).child(s.name))
+      .child(div().id("project-name").flex_1().min_w(0).truncate().text_size(13.5).font_semibold().text_color(color)
+        .cursor_pointer().tooltip(W().renameHint).accessibility_label(`${s.name} · ${W().renameHint}`)
+        .on_click((e, _cx) => { if (e?.click_count >= 2) run("space.rename", { id: s.id }); })
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(s); })
+        .child(s.name))
       .when(multiDevice(spaces()), (el) => el.child(h_flex().id("device").gap(3).items_center().text_size(11).text_color(t.dim)
         .tooltip(deviceName(s.machine ?? null)).child(svg(deviceIcon(s.machine ?? null)).size(11))
         .child(div().max_w(70).truncate().child(deviceName(s.machine ?? null)))))
@@ -293,16 +401,17 @@ export default class ArcSidebar extends View {
         .tooltip(`${s.name}${s.status ? " · " + label(s.status) : ""} (${W().pinHint})`)
         .accessibility_label(`${W().project} ${s.name}`)
         .cursor_pointer().on_click(() => run("space.select", { id: s.id }))
-        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.togglePin(s.id, all); })
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(s); })
         .child(this.avatar(t, s, 22, 6))
         .when(Boolean(dot), (el) => el.child(div().absolute().top(-3).right(-3).child(dot)));
     });
-    return v_flex().gap(6)
-      .child(div().px(2).text_size(11).text_color(t.dim).child(W().others(others.length)))
-      .child(h_flex().flex_wrap().gap(4).children(dots));
+    const head = this.sectionHead(t, "@others", W().others(others.length));
+    if (this.folded("@others")) return head;
+    return v_flex().gap(6).child(head).child(h_flex().flex_wrap().gap(4).children(dots));
   }
 
   render() {
+    if (this.menu) return renderMenu();
     const t = theme();
     const all = spaces();
     const pins = this.pinned(all);
@@ -312,16 +421,19 @@ export default class ArcSidebar extends View {
       .sort((a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9));
     const active = all.find((s) => s.active);
     const root = v_flex().id("arc-root").size_full().bg(t.chrome).px(PAD_X).pt(4).pb(8).gap(10).overflow_y_scrollbar()
+      .on_mouse_up("left", (_e, cx) => { if (this.pressed) { this.pressed = this.over = null; cx.notify(); } })
       .on_size_change((size, cx) => {
         const n = columnsFor(size.width / (settings().zoom || 1));
         if (n !== this.columns) { this.columns = n; cx.notify(); }
       })
       .child(this.grid(t, pinnedSpaces, all));
-    const waiting = this.waiting(t, active);
-    if (waiting) root.child(waiting);
+    // The open project sits under its tile; who else is waiting sits at the bottom, out of the way.
     if (active) root.child(this.card(t, active));
+    const waiting = this.waiting(t, active);
     const strip = this.strip(t, others, all);
-    if (strip) root.child(div().flex_1().min_h(8)).child(strip);
+    if (waiting || strip) root.child(div().flex_1().min_h(8));
+    if (waiting) root.child(waiting);
+    if (strip) root.child(strip);
     return root;
   }
 }

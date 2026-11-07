@@ -72,15 +72,37 @@
       "resizable": false,
       "children": [
         {
-          "id": "tabs",
-          "type": "block",
+          "id": "tabs-row",
+          "type": "row",
           "size": {
             "px": 42
           },
-          "window_drag": true,
-          "content": {
-            "mod": "tabs"
-          }
+          "resizable": false,
+          "children": [
+            {
+              "id": "tabs",
+              "type": "block",
+              "window_drag": true,
+              "content": {
+                "mod": "tabs"
+              }
+            },
+            {
+              "id": "board-toggle",
+              "type": "block",
+              "size": {
+                "px": 84
+              },
+              "window_drag": true,
+              "content": {
+                "mod": "agent-board",
+                "props": {
+                  "role": "toggle",
+                  "lang": "en"
+                }
+              }
+            }
+          ]
         },
         {
           "id": "work-body",
@@ -89,33 +111,55 @@
           "gap": 8,
           "children": [
             {
-              "id": "main",
-              "type": "block",
-              "content": {
-                "tab": "active",
-                "pane": {
-                  "gap": 8,
+              "id": "main-stack",
+              "type": "stack",
+              "active": "main",
+              "children": [
+                {
+                  "id": "main",
+                  "type": "block",
+                  "content": {
+                    "tab": "active",
+                    "pane": {
+                      "gap": 8,
+                      "radius": 10,
+                      "background": "background",
+                      "lone": true,
+                      "border": {
+                        "width": 1,
+                        "color": "border"
+                      },
+                      "focus": {
+                        "width": 1,
+                        "color": "accent"
+                      },
+                      "header": {
+                        "content": {
+                          "mod": "pane"
+                        },
+                        "height": 30,
+                        "position": "top",
+                        "reveal": "always"
+                      }
+                    }
+                  }
+                },
+                {
+                  "id": "board",
+                  "type": "block",
                   "radius": 10,
-                  "background": "background",
-                  "lone": true,
                   "border": {
                     "width": 1,
                     "color": "border"
                   },
-                  "focus": {
-                    "width": 1,
-                    "color": "accent"
-                  },
-                  "header": {
-                    "content": {
-                      "mod": "pane"
-                    },
-                    "height": 30,
-                    "position": "top",
-                    "reveal": "always"
+                  "content": {
+                    "mod": "agent-board",
+                    "props": {
+                      "lang": "en"
+                    }
                   }
                 }
-              }
+              ]
             },
             {
               "id": "panel",

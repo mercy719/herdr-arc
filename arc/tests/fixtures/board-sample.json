@@ -1,0 +1,87 @@
+{
+  "generated_ms": 1762500000000,
+  "agents": {
+    "t24": {
+      "where": "Work / Nerd",
+      "machine": null,
+      "space": "Work",
+      "tab": "Nerd",
+      "status": "working",
+      "turn": 31,
+      "now": "给看板写 Herdr 集成预览",
+      "now_ms": 1762499990000,
+      "last_prompt": "看板不错 做吧",
+      "tasks": [
+        { "id": "1", "subject": "侧边栏加「在干什么」", "status": "pending" },
+        { "id": "2", "subject": "看板：独立视图 + Herdr 集成两版预览", "status": "in_progress" },
+        { "id": "3", "subject": "arc 布局开源到 Herdr gallery，截图已脱敏", "status": "completed" },
+        { "id": "4", "subject": "合并 #893，健康检查全绿", "status": "completed" }
+      ]
+    },
+    "t25": {
+      "where": "Work / Travel",
+      "machine": null,
+      "space": "Work",
+      "tab": "Travel",
+      "status": "idle",
+      "turn": 8,
+      "now": "空闲 · 上次：比价东京酒店",
+      "now_ms": 1762499000000,
+      "last_prompt": "比价东京酒店",
+      "tasks": []
+    },
+    "cn/t5": {
+      "where": "shop-api / 平台工程",
+      "machine": "cn",
+      "space": "shop-api",
+      "tab": "平台工程",
+      "status": "done",
+      "turn": 157,
+      "now": "核对 37 个定时任务的配置",
+      "now_ms": 1762499000000,
+      "last_prompt": "核对定时任务",
+      "tasks": [
+        { "id": "1", "subject": "Supabase 升级 Pro 后连接数核对", "status": "completed" }
+      ]
+    }
+  },
+  "cards": [
+    {
+      "id": "u-deepseek",
+      "text": "接 DeepSeek Flash 做一句话总结，30 秒节流",
+      "space": "Work",
+      "terminal": null,
+      "state": "todo",
+      "queued": false,
+      "sentTurn": null,
+      "back": null,
+      "created_ms": 1762499980000,
+      "moved_ms": 1762499980000
+    },
+    {
+      "id": "u-remote-chat",
+      "text": "MateBook 装好远程版 Chat 视图",
+      "space": "Work",
+      "terminal": "t25",
+      "state": "review",
+      "queued": false,
+      "sentTurn": 7,
+      "back": null,
+      "created_ms": 1762490000000,
+      "moved_ms": 1762499800000
+    },
+    {
+      "id": "u-keepa",
+      "text": "Keepa 抓取和选品探索错开时间",
+      "space": "shop-api",
+      "terminal": "cn/t5",
+      "state": "doing",
+      "queued": true,
+      "sentTurn": null,
+      "back": null,
+      "created_ms": 1762498000000,
+      "moved_ms": 1762498000000
+    }
+  ],
+  "accepted": ["t24#4"]
+}
