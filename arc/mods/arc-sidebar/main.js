@@ -6,7 +6,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
 import { spaces, agents, run, theme, shared, setShared, props, settings, exec, appHome } from "herdr";
-import { openMenu, renderMenu, watchIconPicks, customIcon } from "./menu.js";
+import { openMenu, openTabMenu, renderMenu, watchIconPicks, watchAgentOps, customIcon, GLYPH } from "./menu.js";
 
 // Same table as the shipped `spaces` mod, so a project has one color everywhere.
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
@@ -47,7 +47,7 @@ const WORDS = {
   en: {
     status: { blocked: "Needs you", done: "Done", working: "Working", idle: "Idle", auto: "Scheduled run done" },
     needsYou: "Needs you", unpinHint: "drag to reorder · right-click for more", pinHint: "right-click for more", renameHint: "double-click to rename · right-click for more", project: "Project",
-    putBack: "Put back in the list", settle: "Settle (keeps running)",
+    more_: "More", ops: { stop: "Closing agent…", restart: "Restarting agent…", resume: "Resuming…" },
     waiting: (n) => `Waiting in other projects ${n}`, more: (n) => `${n} more`,
     newSession: "New session in this project",
     older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
@@ -58,7 +58,7 @@ const WORDS = {
   zh: {
     status: { blocked: "等你处理", done: "已完成", working: "进行中", idle: "空闲", auto: "定时任务已完成" },
     needsYou: "等你", unpinHint: "拖动排序 · 右键更多操作", pinHint: "右键更多操作", renameHint: "双击重命名 · 右键更多操作", project: "项目",
-    putBack: "放回列表", settle: "收起（继续运行）",
+    more_: "更多", ops: { stop: "正在关闭 Agent…", restart: "正在重启 Agent…", resume: "正在恢复对话…" },
     waiting: (n) => `别的项目在等你 ${n}`, more: (n) => `还有 ${n} 个`,
     newSession: "在这个项目里新开会话",
     older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
@@ -81,8 +81,9 @@ function icon(p, size, color) {
 
 export default class ArcSidebar extends View {
   init(_props, cx) {
-    if (props()?.menuFor) { this.menu = true; return; }
+    if (props()?.menuFor || props()?.tabMenu) { this.menu = true; return; }
     watchIconPicks(this, cx);
+    watchAgentOps(this, cx);
     this.watchNow(cx);
     this.open = { older: false, settled: false };
     this.columns = 4;
@@ -103,6 +104,7 @@ export default class ArcSidebar extends View {
             if (seen !== this.nowSeen) { this.nowSeen = seen; setShared("agent.now", agents); }
           } catch { /* a bad run keeps the last lines */ }
         }
+        await this.refreshResumable();
         await exec("sleep", [String(NOW_EVERY_S)]).catch(() => null);
       }
     });
@@ -291,19 +293,33 @@ export default class ArcSidebar extends View {
       .bg(tab.active ? t.background : color + "00")
       .when(tab.active, (el) => el.border(1).border_color(color + "55"))
       .hover((st) => st.bg(tab.active ? t.background : t.hover)).cursor_pointer()
-      .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}${doing ? " · " + doing : ""}`)
+      .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}${doing ? " · " + doing : ""} (${W().pinHint})`)
       .on_click(() => run("tab.select", { id: tab.id }))
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.tabMenu(tab, agent); })
       .child(lead)
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(div().truncate().text_size(13).text_color(tab.settled ? t.dim : t.foreground).child(tab.name))
         .when(Boolean(doing), (el) => el.child(div().truncate().text_size(11.5).text_color(t.dim).child(doing))))
       .when(pinned, (el) => el.child(svg("mods/workspace-chrome/pin.svg").size(11).flex_none().text_color(color)))
       .when(Boolean(status), (el) => el.child(status))
-      .child(div().id(`settle-${tab.id}`).flex_none().size(20).rounded(5).flex().items_center().justify_center()
-        .text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-        .tooltip(tab.settled ? W().putBack : W().settle)
-        .on_click((_e, cx) => { cx.stop_propagation(); run(tab.settled ? "tab.unsettle" : "tab.settle", { id: tab.id }); })
-        .child(svg(`mods/workspace-chrome/${tab.settled ? "chevron-left" : "archive"}.svg`).size(12)));
+      .child(this.rowAction(t, tab, agent));
+  }
+
+  tabMenu(tab, agent) {
+    openTabMenu({ id: tab.id, settled: tab.settled, address: agent?.app === "claude-code" ? agent.address : null,
+      resumable: Boolean(shared("agent.resumable")?.[tab.id]) });
+  }
+
+  // One button per row: a spinner while an op runs, otherwise ⋯ for the row menu (same as right-click).
+  rowAction(t, tab, agent) {
+    const busy = this.busy?.[tab.id];
+    const box = div().id(`act-${tab.id}`).flex_none().size(20).rounded(5).flex().items_center().justify_center();
+    if (busy) return box.tooltip(W().ops[busy]).accessibility_label(W().ops[busy])
+      .child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900));
+    return box.text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+      .tooltip(W().more_).accessibility_label(W().more_)
+      .on_click((_e, cx) => { cx.stop_propagation(); this.tabMenu(tab, agent); })
+      .child(svg(GLYPH("ellipsis")).size(14));
   }
 
   fold(t, key, label, hint) {

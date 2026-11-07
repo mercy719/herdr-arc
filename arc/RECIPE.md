@@ -44,7 +44,9 @@ The `main` layout with its left sidebar replaced, top to bottom:
    agent come before plain terminals; pinned agents (`terminal.pin`) first of
    all. Under each agent's name a grey line says what it is doing now, from
    `agentnow.py`. Idle tabs untouched for 12 hours fold into **Older N**;
-   settled tabs into **Settled N**.
+   settled tabs into **Settled N**. Each row ends in **⋯** (right-click works too):
+   Restart agent, Close agent (keep terminal), Resume conversation (after a
+   close), Settle / Put back. A spinner stands in for ⋯ while one runs.
 4. A spacer, then at the bottom:
    - **Other projects waiting on you**: blocked or done agents elsewhere, with
      their project's name and how long ago they stopped. Click to jump there.
@@ -88,7 +90,15 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   started by a scheduled wakeup (`turnOrigin: "scheduled"` in the transcript)
   marks the agent `auto`, which is what makes its light blue.
 - **Clicks.** A tile or mark runs `space.select`; a waiting row runs
-  `agent.focus`; a tab row selects its tab, and its archive button settles it.
+  `agent.focus`; a tab row selects its tab, and its ⋯ opens the row menu.
+- **Close, resume, restart** (`agentctl.py`, Claude Code only). Close remembers
+  the session id, cwd and the flags worth keeping (`--model`,
+  `--dangerously-skip-permissions`, …) in `~/.cache/herdr-agent-board/resume.json`,
+  then sends claude TERM (KILL after 8 s); the terminal falls back to its
+  shell. Resume writes `cd <cwd> && claude <flags> --resume <id>` to
+  `/tmp/herdr-resume-<terminal>.sh` and types `. /tmp/herdr-resume-<terminal>.sh`
+  into the shell. Restart is both, with plain `claude`, so a freshly updated
+  install takes over the conversation.
   The card's + runs `tab.new`; the header's + runs `space.new`.
 - Pins in `shared("arc.pinned")` (until the first change every project is
   pinned, new ones included); tile order is the pin order. Folds in
@@ -106,7 +116,8 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   (`main`) and the `board` block. Every arc block takes `props.lang`.
 - `mods/arc-sidebar`: `main.js` (the sidebar), `menu.js` (the right-click
   popup, a copy of this mod opened with `openOverlay`, and the icon picker),
-  `agentnow.py`. Icons from the shipped `mods/workspace-chrome/*.svg`.
+  `agentnow.py`, `agentctl.py` (close / resume / restart). Icons from the
+  shipped `mods/workspace-chrome/*.svg`, plus `glyphs/` (lucide, ISC).
 - `mods/agent-board`: `main.js` (the board), `board-logic.js` (card states,
   sends, queueing; no Herdr imports), `toggle.js` (the pill), `images.js`
   (clipboard and dropped images; adapted from claude-chat, MIT).
@@ -123,8 +134,14 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   environment), model `MODEL` at the top of the file (`deepseek-v4.1-flash`,
   for a gateway that routes it). Change `MODEL` to one your endpoint serves,
   or the grey lines stay empty; nothing else breaks.
-- It never reads `~/.claude/sessions/*.key` and never types into a terminal;
-  only the board sends, and only after you drag or click.
+- It never reads `~/.claude/sessions/*.key`. Only the board and the row menu
+  type into terminals, and only after you drag or click.
+- `hc send` always wraps text in an `<hc from=…>` note, which claude reads as
+  a message and a shell can't parse; that is why close is a signal and resume
+  types keys. `hc keys` knows letters, digits, space and `. / -`, and types
+  capitals as small letters, hence the lowercase `/tmp` path.
+- Resume needs the conversation to have at least one message; an empty one
+  was never saved. Closing a working agent cuts its turn short.
 - Herdr loads images only from under `mods/` and not from hidden folders, so
   picked icons go to `mods/arc-sidebar/icons/` (written last: a new file in a
   mod's folder reloads it). A missing `AvatarImage` file draws nothing, not
