@@ -270,9 +270,11 @@ export default class AgentBoard extends View {
     const saved = (shared("arc.icons") ?? {})[space.id];
     const custom = typeof saved === "string" && saved
       ? `mods/arc-sidebar/icons/${saved.replace(/^arc-icons\//, "").replace(/[^A-Za-z0-9_.-]/g, "_")}` : null;
-    const body = custom || LOGOS[space.name]
+    // The sidebar remembers a bundled logo by space id (arc.logoIds), so a renamed project keeps it.
+    const logo = LOGOS[space.name] ?? (shared("arc.logoIds") ?? {})[space.id] ?? null;
+    const body = custom || logo
       ? Avatar.new().w(size).h(size).flex_none().rounded(radius).overflow_hidden()
-        .image(AvatarImage.new(custom ?? `mods/arc-sidebar/logos/${LOGOS[space.name]}.png`).size_full())
+        .image(AvatarImage.new(custom ?? `mods/arc-sidebar/logos/${logo}.png`).size_full())
         .fallback(AvatarFallback.new().size_full().bg(fill(t, space)).items_center().justify_center()
           .text_size(Math.round(size * 0.48)).font_bold().text_color("#ffffff").child(initial(space.name)))
       : h_flex().size(size).flex_none().rounded(radius).bg(fill(t, space)).items_center().justify_center()

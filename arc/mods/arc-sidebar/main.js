@@ -148,14 +148,24 @@ export default class ArcSidebar extends View {
     return null;
   }
 
+  // A bundled logo found by name is remembered by space id (arc.logoIds), so renaming a project keeps it.
+  logoOf(s) { return LOGOS[s.name] ?? (shared("arc.logoIds") ?? {})[s.id] ?? null; }
+
+  rememberLogos(all) {
+    const kept = shared("arc.logoIds") ?? {};
+    const fresh = all.filter((s) => LOGOS[s.name] && kept[s.id] !== LOGOS[s.name]);
+    if (fresh.length) setShared("arc.logoIds", { ...kept, ...Object.fromEntries(fresh.map((s) => [s.id, LOGOS[s.name]])) });
+  }
+
   avatar(t, s, size, radius) {
     const custom = customIcon(s.id);
-    if (!custom && !LOGOS[s.name]) {
+    const logo = this.logoOf(s);
+    if (!custom && !logo) {
       return h_flex().size(size).flex_none().rounded(radius).bg(fill(t, s)).items_center().justify_center()
         .text_size(Math.round(size * 0.48)).font_bold().text_color("#ffffff").child(initial(s.name));
     }
     return Avatar.new().w(size).h(size).flex_none().rounded(radius).overflow_hidden()
-      .image(AvatarImage.new(custom ?? `mods/arc-sidebar/logos/${LOGOS[s.name]}.png`).size_full())
+      .image(AvatarImage.new(custom ?? `mods/arc-sidebar/logos/${logo}.png`).size_full())
       .fallback(AvatarFallback.new().size_full().bg(fill(t, s)).items_center().justify_center()
         .text_size(Math.round(size * 0.48)).font_bold().text_color("#ffffff").child(initial(s.name)));
   }
@@ -414,6 +424,7 @@ export default class ArcSidebar extends View {
     if (this.menu) return renderMenu();
     const t = theme();
     const all = spaces();
+    this.rememberLogos(all);
     const pins = this.pinned(all);
     const byId = Object.fromEntries(all.map((s) => [s.id, s]));
     const pinnedSpaces = pins.map((id) => byId[id]).filter(Boolean);

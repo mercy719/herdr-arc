@@ -92,7 +92,8 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   The card's + runs `tab.new`; the header's + runs `space.new`.
 - Pins in `shared("arc.pinned")` (until the first change every project is
   pinned, new ones included); tile order is the pin order. Folds in
-  `shared("arc.folded")`, icons in `shared("arc.icons")`.
+  `shared("arc.folded")`, icons in `shared("arc.icons")`, and a listed logo is
+  remembered by space id in `shared("arc.logoIds")`, so renaming keeps it.
 - Hovers show the full name, status and what it's doing in a tooltip.
 
 ## Built from
