@@ -20,7 +20,7 @@ The `main` layout with its left sidebar replaced, top to bottom:
 
 1. **Header** (`mods/arc-chrome`, a copy of the shipped `workspace-chrome`
    header): Herdr mark, then **+ new project**, search, sidebar toggle.
-2. **Project tiles**, 4 columns, 46px high: each project (space) is a
+2. **Project tiles**, 46px high, as many columns as fit (4 at 268px; 2 to 8 as you drag the sidebar): each project (space) is a
    colored initial (or a logo you add) with its name under it. The selected
    one is tinted and outlined in its color. The corner badge counts that
    project's agents that need you (blocked first, else done and unseen); a
@@ -72,7 +72,7 @@ Project colors are the same table as the shipped Spaces list, and
 ## Built from
 
 - `layouts/arc.json`: the shipped `main` window with its sidebar column's
-  middle block replaced. Sidebar column, 268px: `brand` block (46px,
+  middle block replaced. Sidebar column, 268px and draggable: `brand` block (46px,
   `mod: arc-chrome`), `projects` block (`mod: arc-sidebar`), footer block
   (69px, shipped `workspace-chrome` with `props.footer`). Both arc blocks
   take `props.lang`.
@@ -91,7 +91,7 @@ Project colors are the same table as the shipped Spaces list, and
   only give an image to names you have a file for.
 - `done` only shows if the agent went working → done while unseen; an
   agent that reports done straight away reads as idle.
-- Tile names truncate at about 10 characters in 4 columns at 268px.
+- Tile names truncate at about 10 characters at 268px; a wider sidebar adds columns, not wider tiles.
 - `arc-chrome` is a copy: it won't pick up later changes to the shipped
   header.
 

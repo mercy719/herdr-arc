@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Avatar, AvatarImage, AvatarFallback } from "gpui-base";
-import { spaces, agents, run, theme, shared, setShared, props } from "herdr";
+import { spaces, agents, run, theme, shared, setShared, props, settings } from "herdr";
 
 // Same table as the shipped `spaces` mod, so a project has one color everywhere.
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
@@ -15,7 +15,9 @@ const RANK = { blocked: 0, done: 1, working: 2, idle: 3 };
 // space name here, e.g. { "my-app": "my-app" } for logos/my-app.png. Only listed
 // names get an image: a missing file draws blank instead of the initial.
 const LOGOS = {};
-const COLUMNS = 4;
+// Tiles stay about this wide; the column count follows the sidebar width.
+const TILE_MIN = 56, GAP = 4, PAD_X = 8;
+const columnsFor = (w) => Math.max(2, Math.min(8, Math.floor((w - 2 * PAD_X + GAP) / (TILE_MIN + GAP))));
 const OLDER_MS = 12 * 3600 * 1000;
 
 function hash(s) {
@@ -70,6 +72,7 @@ function icon(p, size, color) {
 export default class ArcSidebar extends View {
   init() {
     this.open = { older: false, settled: false };
+    this.columns = 4;
   }
 
   // Pinned ids, in order; until you unpin one, every project (new ones too).
@@ -137,10 +140,11 @@ export default class ArcSidebar extends View {
   rows(t, list, all) {
     const rows = [];
     const tiles = list.map((s) => this.tile(t, s, all));
-    for (let i = 0; i < tiles.length; i += COLUMNS) {
-      const slice = tiles.slice(i, i + COLUMNS);
-      const row = h_flex().gap(4).children(slice);
-      for (let k = slice.length; k < COLUMNS; k++) row.child(div().flex_1());
+    const n = this.columns;
+    for (let i = 0; i < tiles.length; i += n) {
+      const slice = tiles.slice(i, i + n);
+      const row = h_flex().gap(GAP).children(slice);
+      for (let k = slice.length; k < n; k++) row.child(div().flex_1());
       rows.push(row);
     }
     return rows;
@@ -307,7 +311,11 @@ export default class ArcSidebar extends View {
     const others = all.filter((s) => !pins.includes(s.id))
       .sort((a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9));
     const active = all.find((s) => s.active);
-    const root = v_flex().id("arc-root").size_full().bg(t.chrome).px(8).pt(4).pb(8).gap(10).overflow_y_scrollbar()
+    const root = v_flex().id("arc-root").size_full().bg(t.chrome).px(PAD_X).pt(4).pb(8).gap(10).overflow_y_scrollbar()
+      .on_size_change((size, cx) => {
+        const n = columnsFor(size.width / (settings().zoom || 1));
+        if (n !== this.columns) { this.columns = n; cx.notify(); }
+      })
       .child(this.grid(t, pinnedSpaces, all));
     const waiting = this.waiting(t, active);
     if (waiting) root.child(waiting);
