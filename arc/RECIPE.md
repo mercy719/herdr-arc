@@ -1,9 +1,9 @@
 # Arc
 
-An Arc / Dia style sidebar for Herdr, with an agent board. Projects sit in a
-grid of tiles at the top; click one and the sidebar shows only that project's
-sessions, each with a line saying what its agent is doing. A board beside the
-terminals takes your todos to agents and back for review.
+An Arc / Dia style sidebar for Herdr. Projects sit in a grid of tiles at the
+top; click one and the sidebar shows only that project's sessions, each with a
+line saying what its agent is doing, and a menu to rename, restart, close or
+resume it.
 
 ![Arc](preview.png)
 
@@ -13,7 +13,7 @@ next to it are one build of it.
 The sidebar speaks English or Chinese. Mods can't see the system language,
 so the layout picks it: `"props": { "lang": "zh" }` on the `arc-sidebar` and
 `arc-chrome` blocks in `layouts/arc.json` (`"en"` is the default).
-[中文界面截图](preview-zh.png) · [看板（演示数据）](preview-board-zh.png)
+[中文界面截图](preview-zh.png)
 
 ## What you see
 
@@ -58,29 +58,6 @@ The `main` layout with its left sidebar replaced, top to bottom:
    Unpin, Change icon… (a file dialog; the image is padded to a 256px square),
    Default icon, Close project.
 
-In the tab row, a two-cell pill switches the main area between the terminals
-and the **board** (`mods/agent-board`). Picking a tab switches back.
-
-## The board
-
-Four columns: To do → In progress → To review → Accepted. Cards come from two
-places:
-
-- **Your todos.** Click the To do column (or "Add todo") and type; paste
-  (`cmd+v`) or drop images in too. Enter adds it; clicking elsewhere saves it,
-  or drops it when empty. Drag a card to In progress and pick a session: an
-  idle one gets the text at once (`hc send`, images as paths on their own
-  lines, copied over with `hc put` for another machine); a busy one queues it
-  until it's free. When that session's next turn ends, the card moves to To
-  review. **Pass** accepts it; **Fail** asks for a reason and sends it back.
-  Only you can put a card in Accepted.
-- **The agent's own task list** (Claude Code's TaskCreate/TaskUpdate, or the
-  older TodoWrite), read from the transcript. Read-only, marked with a robot.
-
-The board shows the current project; "All" shows every project, filterable by
-project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
-`shared("board.accepted")`.
-
 ## How it behaves
 
 - **What each agent is doing.** `mods/arc-sidebar/agentnow.py` runs every 20
@@ -88,7 +65,7 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   (other machines' too), finds each one's transcript, reads its tail, and asks
   a small model for a one-line summary when the activity changed (at most
   every 30 s per agent; cached in `~/.cache/herdr-agent-board/`). The result
-  goes to `shared("agent.now")`, which the sidebar and the board read. A turn
+  goes to `shared("agent.now")`, which the sidebar reads. A turn
   started by a scheduled wakeup (`turnOrigin: "scheduled"` in the transcript)
   marks the agent `auto`, which is what makes its light blue.
 - **Clicks.** A tile or mark runs `space.select`; a waiting row runs
@@ -113,19 +90,14 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
 - `layouts/arc.json`: the shipped `main` window. Sidebar column, 268px and
   draggable: `brand` (46px, `arc-chrome`), `projects` (`arc-sidebar`), footer
   (shipped `workspace-chrome` with `props.footer`). Work column: a `tabs-row`
-  with the shipped `tabs` and a `board-toggle` block (`agent-board` with
-  `props.role: "toggle"`); under it a `main-stack` stack holding the terminals
-  (`main`) and the `board` block. Every arc block takes `props.lang`.
+  with the shipped `tabs`; under it a `main-stack` holding the terminals
+  (`main`). Every arc block takes `props.lang`.
 - `mods/arc-sidebar`: `main.js` (the sidebar), `menu.js` (the right-click
   popup, a copy of this mod opened with `openOverlay`, and the icon picker),
   `agentnow.py`, `agentctl.py` (close / resume / restart). Icons from the
   shipped `mods/workspace-chrome/*.svg`, plus `glyphs/` (lucide, ISC).
-- `mods/agent-board`: `main.js` (the board), `board-logic.js` (card states,
-  sends, queueing; no Herdr imports), `toggle.js` (the pill), `images.js`
-  (clipboard and dropped images; adapted from claude-chat, MIT).
 - `mods/arc-chrome`: the shipped `workspace-chrome` header plus a +.
-- `tests/`: `node --test tests/board-logic.test.js` and
-  `python3 -m unittest discover -s tests`.
+- `tests/`: `python3 -m unittest discover -s tests`.
 
 ## Watch out
 
@@ -136,8 +108,7 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   environment), model `MODEL` at the top of the file (`deepseek-v4.1-flash`,
   for a gateway that routes it). Change `MODEL` to one your endpoint serves,
   or the grey lines stay empty; nothing else breaks.
-- It never reads `~/.claude/sessions/*.key`. Only the board and the row menu
-  type into terminals, and only after you drag or click.
+- It never reads `~/.claude/sessions/*.key`. Only the row menu types into terminals, and only after you drag or click.
 - `hc send` always wraps text in an `<hc from=…>` note, which claude reads as
   a message and a shell can't parse; that is why close is a signal and resume
   types keys. `hc keys` knows letters, digits, space and `. / -`, and types
@@ -152,8 +123,7 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   then keeps the last line.
 - Mods can't read the system language, hence `props.lang`.
 - `done` only shows if the agent went working → done while unseen.
-- Statuses and summaries lag up to ~20 s; a queued card goes out on the next
-  refresh after its session frees up.
+- Statuses and summaries lag up to ~20 s.
 - `arc-chrome` is a copy: it won't pick up later changes to the shipped header.
 
 ## Done when
@@ -163,8 +133,7 @@ project mark. Cards live in `shared("board.cards")`, accepted agent tasks in
   under "waiting on you", with its project and how long ago.
 - Each agent row has a grey "doing now" line within a minute.
 - Dragging a tile reorders it; right-click offers rename, pin and icon.
-- A todo dragged to In progress reaches an idle session; when its turn ends
-  the card is in To review; Fail sends the reason back.
+- Restart from a row's ⋯ brings the same conversation back in the same terminal.
 - `"lang": "zh"` switches every word to Chinese.
 
 ## Logos

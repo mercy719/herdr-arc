@@ -90,7 +90,7 @@ export default class ArcSidebar extends View {
     this.pressed = this.over = null;
   }
 
-  // One line per agent from agentnow.py into shared("agent.now"), for this list and the board.
+  // One line per agent from agentnow.py into shared("agent.now"), for this list.
   watchNow(cx) {
     const script = `${appHome()}/mods/arc-sidebar/agentnow.py`;
     cx.spawn(async () => {

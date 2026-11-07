@@ -86,21 +86,6 @@
               "content": {
                 "mod": "tabs"
               }
-            },
-            {
-              "id": "board-toggle",
-              "type": "block",
-              "size": {
-                "px": 84
-              },
-              "window_drag": true,
-              "content": {
-                "mod": "agent-board",
-                "props": {
-                  "role": "toggle",
-                  "lang": "en"
-                }
-              }
             }
           ]
         },
@@ -141,21 +126,6 @@
                         "position": "top",
                         "reveal": "always"
                       }
-                    }
-                  }
-                },
-                {
-                  "id": "board",
-                  "type": "block",
-                  "radius": 10,
-                  "border": {
-                    "width": 1,
-                    "color": "border"
-                  },
-                  "content": {
-                    "mod": "agent-board",
-                    "props": {
-                      "lang": "en"
                     }
                   }
                 }

@@ -2,13 +2,13 @@
 
 An Arc / Dia style sidebar layout for [Herdr](https://herdr.dev): projects as
 a tile grid on top with status lights, click one to see only its sessions and
-what each agent is doing, plus a board that hands your todos to agents.
+what each agent is doing, with a menu to restart, close or resume it.
 
 ![Arc](arc/preview.png)
 
 | Layout | |
 | --- | --- |
-| [Arc](arc/) | project tiles with status lights, the chosen project's sessions with a "doing now" line, a todo → review board |
+| [Arc](arc/) | project tiles with status lights, the chosen project's sessions with a "doing now" line and a restart / close / resume menu |
 
 Install: copy `arc/layouts/arc.json` and `arc/mods/` into
 `~/.config/herdr-app/`, then `herdr-app do layout.switch '{"name":"arc"}'`.
@@ -16,7 +16,7 @@ English and Chinese: set `"lang": "zh"` in the layout for Chinese ([screenshot](
 See [arc/RECIPE.md](arc/RECIPE.md) for what it does and how to rebuild it.
 
 `mods/arc-chrome` is adapted from Herdr's `workspace-chrome` mod
-(Apache-2.0); `mods/agent-board/images.js` from claude-chat (MIT).
+(Apache-2.0).
 Everything else here is Apache-2.0.
 
 `agentnow.py` sends a short digest of each agent's activity to the model

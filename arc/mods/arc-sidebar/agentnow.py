@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What each Claude Code agent is doing right now, for Herdr's sidebar and board.
+"""What each Claude Code agent is doing right now, for Herdr's sidebar.
 
 Prints one JSON object to stdout; the shape is in CONTRACT.md.
 Runs as `python3 -I -S agentnow.py` (standard library only).
@@ -71,7 +71,7 @@ SHORT_PARAM = ("file_path", "command", "description", "pattern")
 
 
 def parse_tail(data, truncated):
-    """The bits of a conversation the board shows. Half a first line is dropped."""
+    """The bits of a conversation the sidebar uses. Half a first line is dropped."""
     out = {"last_prompt": None, "last_text": None, "tools": [], "tasks": [], "origin": None}
     if not data:
         return out
@@ -214,7 +214,7 @@ def find_transcript(home, cwd, sid, machine):
 
 
 def inspect(machine, address, homes):
-    """Everything the board knows about one terminal beyond what hc ls said."""
+    """Everything the sidebar knows about one terminal beyond what hc ls said."""
     code, out = run_hc(["get", address, "--json"])
     if code != 0:
         return None
@@ -382,7 +382,7 @@ def save_cache(agents):
             json.dump({"agents": agents}, f, ensure_ascii=False)
         os.replace(tmp, path)
     except OSError:
-        pass  # a board that can't cache still shows what it has
+        pass  # a sidebar that can't cache still shows what it has
 
 
 # --- main ---------------------------------------------------------------------
