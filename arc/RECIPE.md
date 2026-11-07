@@ -44,6 +44,62 @@ The `main` layout with its left sidebar replaced, top to bottom:
 Project colors are the same table as the shipped Spaces list, and
 `shared("space.colors")` wins, so a project has one color everywhere.
 
+## How it behaves
+
+- **Statuses.** Working: a spinner in the theme's `working` color on the tile
+  corner and the tab row. Blocked: a red count badge on the tile, a red
+  "Needs you" pill on the row, and the agent listed under "Waiting in other
+  projects". Done (finished while you weren't looking): a blue count badge /
+  dot, also listed there. Idle: nothing.
+- **Clicks.** A tile or bottom mark runs `space.select`. A row in "Waiting in
+  other projects" runs `agent.focus` on that terminal. A tab row selects the
+  tab; its archive button runs `tab.settle` (or `tab.unsettle` when
+  settled). The card's + runs `tab.new` in that space; the header's + runs
+  `space.new`.
+- **Right-click** a tile to unpin it, a bottom mark to pin it. Pins are kept
+  in `shared("arc.pinned")`; until the first change every project is pinned,
+  new ones included.
+- Folds (Older, Settled) open and close on click and remember nothing.
+- Hovers show the full name and status in a tooltip.
+
+## Built from
+
+- `layouts/arc.json`: the shipped `main` window with its sidebar column's
+  middle block replaced. Sidebar column, 268px: `brand` block (46px,
+  `mod: arc-chrome`), `projects` block (`mod: arc-sidebar`), footer block
+  (69px, shipped `workspace-chrome` with `props.footer`). Both arc blocks
+  take `props.lang`.
+- `mods/arc-sidebar`: one `View`; reads `spaces()`, `agents()`, `theme()`,
+  `shared()`, `props()`; writes `setShared("arc.pinned")`; runs
+  `space.select`, `agent.focus`, `tab.select`, `tab.new`, `tab.settle`,
+  `tab.unsettle`. Icons come from the shipped `mods/workspace-chrome/*.svg`.
+- `mods/arc-chrome`: the shipped `workspace-chrome` header plus a +
+  (`space.new`).
+
+## Watch out
+
+- Mods can't read the system language (no `Intl`, no `navigator`), hence
+  `props.lang`.
+- An `AvatarImage` whose file is missing draws nothing, not its fallback;
+  only give an image to names you have a file for.
+- `done` only shows if the agent went working → done while unseen; an
+  agent that reports done straight away reads as idle.
+- Tile names truncate at about 10 characters in 4 columns at 268px.
+- `arc-chrome` is a copy: it won't pick up later changes to the shipped
+  header.
+
+## Done when
+
+- Every project shows as a tile, 4 per row; the selected one is outlined
+  in its color, and the same color as in the Spaces list.
+- A blocked agent in another project shows a red badge on its tile and a
+  row under "Waiting in other projects" that jumps to it.
+- Clicking a tile shows only that project's tabs in the card.
+- Settling a tab moves it under "Settled N"; its program keeps running.
+- Right-click unpin moves a project to the bottom strip; right-click there
+  pins it back.
+- `"lang": "zh"` switches every word in the sidebar to Chinese.
+
 ## Logos
 
 To show a project's own logo instead of its initial, put a PNG in
