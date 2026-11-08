@@ -8,6 +8,7 @@
 
 Prints one JSON object. Runs as `python3 -I -S agentctl.py` (standard library only).
 """
+import fcntl
 import json
 import os
 import re
@@ -20,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agentnow  # noqa: E402  (same folder; -I leaves it off sys.path)
 
 EXIT_WAIT_S = 8
+STOP_GRACE_MS = 60000  # stop's whole run (exit wait, kill, resume) fits well inside this
 # Flags worth carrying into the resumed session; prompts, --resume/--continue and the rest are dropped.
 KEEP_FLAGS = {"--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--chrome",
               "--no-chrome", "--ide", "--verbose", "--brief"}
@@ -43,10 +45,23 @@ def load():
 def save(records):
     path = store_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+def update(change):
+    """Read, change and write the records under a lock: several ops run at once when a few rows are restarted
+    together, and an unlocked read-change-write let one op's save drop another's record."""
+    path = store_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        records = load()
+        change(records)
+        save(records)
+        return records
 
 
 def kept_flags(argv):
@@ -137,9 +152,7 @@ def stop(address, tab):
     rec = {"address": address, "sid": sid, "cwd": sess.get("cwd") or fg.get("cwd") or home,
            "flags": kept_flags(fg.get("argv") or []), "name": (info.get("labels") or {}).get("where"),
            "stopped_ms": int(time.time() * 1000)}
-    records = load()
-    records[tab] = rec
-    save(records)  # remembered before it exits, so a failed exit still leaves a way back
+    update(lambda r: r.__setitem__(tab, rec))  # remembered before it exits, so a failed exit still leaves a way back
     # A signal, not a typed /exit: `hc send` always wraps text in an <hc from=…> note, which claude reads as a message.
     # claude saves as it goes and exits cleanly on TERM, printing its own resume hint.
     signal(address, pid, "TERM")
@@ -178,9 +191,9 @@ def shell_ready(address, seconds=8):
         time.sleep(0.5)
 
 
-def resume(tab):
-    records = load()
-    rec = records.get(tab)
+def resume(tab, rec=None):
+    """Restart hands over the record it just made, so it never depends on reading it back."""
+    rec = rec or load().get(tab)
     if not rec:
         return {"ok": False, "error": "no-record"}
     info = terminal(rec["address"])
@@ -201,8 +214,7 @@ def resume(tab):
     code, _ = agentnow.run_hc(["keys", rec["address"]] + [("space" if c == " " else c) for c in ". " + path] + ["enter"])
     if code != 0:
         return {"ok": False, "error": "keys-failed"}
-    records.pop(tab, None)
-    save(records)
+    update(lambda r: r.pop(tab, None))
     return {"ok": True}
 
 
@@ -215,12 +227,23 @@ def listing():
         terms = {t.get("address"): t for t in json.loads(out).get("terminals") or []}
     except ValueError:
         return {}
-    records = load()
-    live = {tab: r for tab, r in records.items()
+    fresh = time.time() * 1000 - STOP_GRACE_MS
+    machines = {machine_of(a) for a in terms}
+
+    def gone_for_good(r):
+        # A machine missing from this listing is a hiccup, not proof its terminals are gone.
+        a = r.get("address")
+        return a not in terms and machine_of(a or "") in machines
+
+    def prune(records):
+        # A record a moment old may still see its claude exiting; a sidebar refresh then must not drop it.
+        for tab in [t for t, r in records.items() if gone_for_good(r)
+                    or (r.get("address") in terms and terms[r["address"]].get("agent") == "claude-code"
+                        and r.get("stopped_ms", 0) < fresh)]:
+            del records[tab]
+    records = update(prune)
+    return {t: r for t, r in records.items()
             if r.get("address") in terms and terms[r["address"]].get("agent") != "claude-code"}
-    if live != records:
-        save(live)
-    return live
 
 
 def main(argv):
@@ -236,7 +259,7 @@ def main(argv):
         elif cmd == "restart" and len(argv) == 3:
             result = stop(argv[1], argv[2])
             if result.get("ok"):
-                result = resume(argv[2])
+                result = resume(argv[2], result["record"])
         elif cmd == "list":
             result = listing()
         else:
