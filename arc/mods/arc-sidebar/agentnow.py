@@ -15,15 +15,21 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 TAIL_BYTES = 256 * 1024
 HC_TIMEOUT = 20
 LLM_TIMEOUT = 15
-LLM_WORKERS = 4
+LLM_WORKERS = 8
+INSPECT_WORKERS = 24  # terminals on other machines cost a few hc round trips each; Herdr kills a run after 30 s
 REGEN_SECONDS = 30
+BUDGET_S = 25  # Herdr's exec gives up at 30 s; past this, no new model calls and the run saves what it has
 SYSTEM = "只输出一句不超过16个字的中文短语，描述 agent 此刻在做什么，以动词开头，不要标点结尾。"
 MODEL = "deepseek-v4.1-flash"
+# When the endpoint refuses MODEL (403/404), try these in turn: Claude Code's own haiku setting, then this.
+FALLBACK_MODELS = ("claude-haiku-5-5",)
+REFUSED = object()
 SESSION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 END_PUNCT = "。．.，,、；;：:！!？?…~～ \t\n"
 
@@ -254,18 +260,23 @@ def machine_home(machine, cache):
     return home if home.startswith("/") else None
 
 
-def discover():
-    """[(machine_or_None, hc ls terminal)] for every Claude Code terminal.
+class ListingFailed(Exception):
+    """`hc ls` gave no answer: say nothing rather than report that every agent is gone."""
 
-    `hc ls` already carries other connected machines' terminals as `cn/t5`.
+
+def discover():
+    """([(machine_or_None, hc ls terminal)] for every Claude Code terminal, machines this listing really covered).
+
+    `hc ls` already carries other connected machines' terminals as `cn/t5`. A machine that isn't connected, or
+    that came back with no terminals at all, is a hiccup of this listing (a slow link), not proof its agents ended.
     """
     code, out = run_hc(["ls", "--json"])
     if code != 0:
-        return []
+        raise ListingFailed()
     try:
         data = json.loads(out)
     except ValueError:
-        return []
+        raise ListingFailed()
     found = []
     for t in data.get("terminals") or []:
         addr = t.get("address") or ""
@@ -276,7 +287,10 @@ def discover():
             found.append((machine, dict(t, address=bare)))
         else:
             found.append((None, t))
-    return found
+    with_terms = {(t.get("address") or "").partition("/")[0] for t in data.get("terminals") or [] if "/" in (t.get("address") or "")}
+    covered = {None} | {m.get("name") for m in data.get("machines") or []
+                        if m.get("state") == "connected" and m.get("name") in with_terms}
+    return found, covered
 
 
 # --- one-line summary from the model ------------------------------------------
@@ -318,13 +332,14 @@ def phrase_of(response):
     return None
 
 
-def call_model(activity, base=None, token=None):
+def call_model(activity, base=None, token=None, model=MODEL, timeout=LLM_TIMEOUT):
+    """The phrase, None on a failed call, or REFUSED when the endpoint won't serve that model."""
     if base is None or token is None:
         base, token = model_config()
     if not base or not token:
         return None
     body = json.dumps({
-        "model": MODEL, "max_tokens": 300, "thinking": {"type": "disabled"},
+        "model": model, "max_tokens": 300, "thinking": {"type": "disabled"},
         "system": SYSTEM, "messages": [{"role": "user", "content": activity[:1500]}],
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -332,10 +347,38 @@ def call_model(activity, base=None, token=None):
         headers={"content-type": "application/json", "x-api-key": token,
                  "authorization": "Bearer " + token, "anthropic-version": "2023-06-01"})
     try:
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return phrase_of(r.read())
+    except urllib.error.HTTPError as e:
+        return REFUSED if e.code in (403, 404) else None
     except Exception:
         return None
+
+
+def model_path():
+    return os.path.join(home_dir(), ".cache", "herdr-agent-board", "model.txt")
+
+
+def model_candidates():
+    """The model that worked last time first, then MODEL and the fallbacks, without repeats."""
+    try:
+        with open(model_path(), encoding="utf-8") as f:
+            last = f.read().strip()
+    except OSError:
+        last = ""
+    out = []
+    for m in (last, MODEL, settings_env().get("ANTHROPIC_DEFAULT_HAIKU_MODEL"), *FALLBACK_MODELS):
+        if m and m not in out:
+            out.append(m)
+    return out
+
+
+def remember_model(model):
+    try:
+        with open(model_path(), "w", encoding="utf-8") as f:
+            f.write(model)
+    except OSError:
+        pass
 
 
 def activity_of(address, agent, extracted):
@@ -405,7 +448,8 @@ def build(argv=None):
     ap.add_argument("--only", metavar="ADDRESS", help="one terminal, for debugging")
     args = ap.parse_args(argv)
 
-    terms = discover()
+    started = time.time()
+    terms, covered = discover()
     known = {(m + "/" if m else "") + t["address"] for m, t in terms}
     if args.only:
         terms = [(m, t) for m, t in terms if ((m + "/" if m else "") + t["address"]) == args.only]
@@ -422,7 +466,7 @@ def build(argv=None):
             ex = None  # one bad terminal never sinks the report
         return addr, machine, term, ex
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=INSPECT_WORKERS) as pool:
         for addr, machine, term, ex in pool.map(work, terms):
             extracted[addr] = ex or {}
             agents[addr] = agent_record(machine, term, extracted[addr])
@@ -449,18 +493,43 @@ def build(argv=None):
 
     if pending and not args.no_llm:
         base, token = model_config()
+        def call(body, model):
+            left = started + BUDGET_S - time.time()
+            return call_model(body, base, token, model, timeout=min(LLM_TIMEOUT, left)) if left > 1 else None
+
+        def ask(item, model):
+            addr, fp, text, short = item
+            phrase = call(text, model)
+            if phrase is REFUSED or phrase:
+                return phrase
+            phrase = call(short, model)
+            return phrase if phrase and phrase is not REFUSED else None
+
+        done = []
         if base and token:
-            def ask(item):
-                addr, fp, text, short = item
-                return addr, fp, call_model(text, base, token) or call_model(short, base, token)
+            # The first agent finds a model the endpoint serves; the rest use it.
+            for model in model_candidates():
+                first = ask(pending[0], model)
+                if first is not REFUSED:
+                    done.append((pending[0][0], pending[0][1], first))
+                    if first:
+                        remember_model(model)
+                    break
+        if done:
             with concurrent.futures.ThreadPoolExecutor(max_workers=LLM_WORKERS) as pool:
-                for addr, fp, phrase in pool.map(ask, pending):
+                rest = pool.map(lambda item: (item[0], item[1], ask(item, model)), pending[1:])
+                for addr, fp, phrase in done + list(rest):
                     if phrase:
                         agents[addr]["now"] = phrase
                         agents[addr]["now_ms"] = now_ms
                         cache[addr] = {"fp": fp, "now": phrase, "now_ms": now_ms}
 
-    # `--only` is a debug view of one terminal; a full run drops terminals that are gone.
+    # A machine this listing missed keeps its last lines, so its rows don't go blank for a slow link.
+    machine_of = lambda addr: addr.partition("/")[0] if "/" in addr else None
+    for addr, e in cache.items():
+        if addr not in agents and machine_of(addr) not in covered and e.get("now"):
+            agents[addr] = {"now": e["now"], "now_ms": e.get("now_ms"), "stale": True}
+    # `--only` is a debug view of one terminal; a full run drops terminals that are gone from covered machines.
     keep = known if args.only else set(agents)
     cache = {addr: e for addr, e in cache.items() if addr in keep}
     save_cache(cache)
@@ -471,7 +540,7 @@ def main():
     try:
         result = build()
     except Exception:
-        result = {"generated_ms": int(time.time() * 1000), "agents": {}}
+        return 1  # the sidebar keeps the last lines on a failed run; an empty answer would blank them all
     sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
     return 0
 

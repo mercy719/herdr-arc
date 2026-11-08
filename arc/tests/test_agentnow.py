@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -217,21 +218,28 @@ class Build(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.cache = os.path.join(self.tmp, "now.json")
         self.calls = []
+        self.models = []
+        self.refuse = set()
 
     def run_build(self, argv, extractions, phrase="读文件"):
         def fake_inspect(machine, addr, homes):
             ex = extractions.get(addr)
             return dict(ex) if ex else None
 
-        def fake_call(text, base, token):
+        def fake_call(text, base, token, model=agentnow.MODEL, timeout=None):
             self.calls.append(text)
+            if model in self.refuse:
+                return agentnow.REFUSED
+            self.models.append(model)
             return phrase
 
         with mock.patch.object(agentnow, "cache_path", lambda: self.cache), \
-             mock.patch.object(agentnow, "discover", lambda: list(self.TERMS)), \
+             mock.patch.object(agentnow, "discover", lambda: (list(self.TERMS), getattr(self, "covered", {None, "cn"}))), \
              mock.patch.object(agentnow, "inspect", fake_inspect), \
              mock.patch.object(agentnow, "model_config", lambda: ("http://x:1", "tok")), \
-             mock.patch.object(agentnow, "call_model", fake_call):
+             mock.patch.object(agentnow, "call_model", fake_call), \
+             mock.patch.object(agentnow, "model_path", lambda: os.path.join(self.tmp, "model.txt")), \
+             mock.patch.object(agentnow, "settings_env", lambda: {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku-x"}):
             return json.loads(json.dumps(agentnow.build(argv)))
 
     def test_shape_matches_contract(self):
@@ -295,6 +303,22 @@ class Build(unittest.TestCase):
         self.assertEqual(len(self.calls), 1, "under 30s keeps the old phrase")
         self.assertEqual(out["agents"]["t1"]["now"], "读文件")
 
+    def test_refused_model_falls_back_and_is_remembered(self):
+        ex = {"last_prompt": "p", "tools": [["Bash", "ls"]], "last_text": None, "tasks": []}
+        self.refuse = {agentnow.MODEL}
+        out = self.run_build([], {"t1": ex, "cn/t5": ex})
+        self.assertEqual(out["agents"]["t1"]["now"], "读文件")
+        self.assertEqual(set(self.models), {"haiku-x"})
+        with open(os.path.join(self.tmp, "model.txt")) as f:
+            self.assertEqual(f.read(), "haiku-x")
+
+    def test_no_model_calls_past_the_budget(self):
+        ex = {"last_prompt": "p", "tools": [["Bash", "ls"]], "last_text": None, "tasks": []}
+        with mock.patch.object(agentnow, "BUDGET_S", -5):
+            out = self.run_build([], {"t1": ex})
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(out["agents"]["t1"]["now"])
+
     def test_failed_model_keeps_old_phrase(self):
         ex = {"last_prompt": "p", "tools": [["Bash", "ls"]], "last_text": None, "tasks": []}
         self.run_build([], {"t1": ex})
@@ -306,13 +330,26 @@ class Build(unittest.TestCase):
         out = self.run_build([], {"t1": dict(ex, last_prompt="p3")}, phrase=None)
         self.assertEqual(out["agents"]["t1"]["now"], "读文件")
 
+    def test_machine_missed_by_the_listing_keeps_its_lines(self):
+        with open(self.cache, "w") as f:
+            json.dump({"agents": {"cn/t5": {"fp": "x", "now": "查库存", "now_ms": 1},
+                                  "t9": {"fp": "y", "now": "旧的", "now_ms": 1}}}, f)
+        self.TERMS = [t for t in self.TERMS if t[0] is None]
+        self.covered = {None}  # cn hiccupped this round
+        ex = {"last_prompt": "p", "last_text": "好", "tools": [], "tasks": []}
+        out = self.run_build(["--no-llm"], {"t1": ex})
+        self.assertEqual(out["agents"]["cn/t5"]["now"], "查库存")
+        self.assertNotIn("t9", out["agents"])  # this computer was listed: t9 really ended
+        with open(self.cache) as f:
+            self.assertEqual(sorted(json.load(f)["agents"]), ["cn/t5"])
+
     def test_one_broken_terminal_skipped(self):
         def boom(machine, addr, homes):
             if addr == "t1":
                 raise RuntimeError("hc died")
             return {"last_prompt": "p", "tools": [], "last_text": None, "tasks": []}
         with mock.patch.object(agentnow, "cache_path", lambda: self.cache), \
-             mock.patch.object(agentnow, "discover", lambda: list(self.TERMS)), \
+             mock.patch.object(agentnow, "discover", lambda: (list(self.TERMS), getattr(self, "covered", {None, "cn"}))), \
              mock.patch.object(agentnow, "inspect", boom), \
              mock.patch.object(agentnow, "model_config", lambda: (None, None)):
             out = agentnow.build(["--no-llm"])
@@ -342,12 +379,28 @@ class Discover(unittest.TestCase):
             {"address": "t2", "agent": "zsh", "turn": 0},
         ]}).encode()
         with mock.patch.object(agentnow, "run_hc", lambda args, timeout=0: (0, payload)):
-            terms = agentnow.discover()
+            terms, _ = agentnow.discover()
         self.assertEqual([(m, t["address"]) for m, t in terms], [(None, "t1"), ("cn", "t5")])
 
-    def test_broken_hc_is_empty(self):
+    def test_broken_hc_raises(self):
         with mock.patch.object(agentnow, "run_hc", lambda args, timeout=0: (1, b"")):
-            self.assertEqual(agentnow.discover(), [])
+            self.assertRaises(agentnow.ListingFailed, agentnow.discover)
+
+    def test_covers_only_connected_machines_that_listed_terminals(self):
+        payload = json.dumps({"machines": [{"name": "cn", "state": "connected"}, {"name": "dl", "state": "connected"},
+                                           {"name": "ky", "state": "connecting"}],
+                              "terminals": [{"address": "t1", "agent": "zsh"}, {"address": "dl/t2", "agent": "zsh"},
+                                            {"address": "ky/t3", "agent": "zsh"}]}).encode()
+        with mock.patch.object(agentnow, "run_hc", lambda args, timeout=0: (0, payload)):
+            _, covered = agentnow.discover()
+        self.assertEqual(covered, {None, "dl"})  # cn listed nothing, ky isn't connected
+
+    def test_main_fails_quietly_when_listing_fails(self):
+        out = io.StringIO()
+        with mock.patch.object(agentnow, "run_hc", lambda args, timeout=0: (1, b"")), \
+                mock.patch("sys.argv", ["agentnow.py"]), mock.patch("sys.stdout", out):
+            self.assertEqual(agentnow.main(), 1)
+        self.assertEqual(out.getvalue(), "")  # no empty answer to blank the sidebar
 
 
 if __name__ == "__main__":
