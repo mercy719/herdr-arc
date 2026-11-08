@@ -35,14 +35,18 @@ The `main` layout with its left sidebar replaced, top to bottom:
    | blue, steady | a scheduled run (a `/loop` or cron wakeup) finished |
 
    The first that applies wins, in that order. Drag a tile onto another tile
-   of the same machine to reorder. With projects on more than one machine,
-   the tiles split into one foldable block per machine (this computer first).
-   Rename machines with `"props": { "machines": { "local": "MacBook Air",
-   "cn": "Mac mini" } }` on the `arc-sidebar` block.
+   of the same machine to reorder; the order is Herdr's own (`space.move`),
+   kept by each machine's core, so every computer shows it the same. With
+   projects on more than one machine, the tiles split into one foldable block
+   per machine. Rename machines with `"props": { "machines": { "local":
+   "MacBook Air", "cn": "Mac mini" } }` on the `arc-sidebar` block, and give
+   every computer the same `"machineOrder": ["MacBook Air", "Mac mini"]` (the
+   names) to order the blocks alike; without it, this computer comes first.
 3. **The project card**, tinted in the project's color: its name (double-click
    to rename), + new session, then one row per tab. Tabs running a coding
-   agent come before plain terminals; pinned agents (`terminal.pin`) first of
-   all. Under each agent's name a grey line says what it is doing now, from
+   agent come before plain terminals; pinned agents (`terminal.pin`, **Pin to
+   top** in the row menu) first of all, and drag one pinned row onto another to
+   reorder them (`tab.move`, the same on every client). Under each agent's name a grey line says what it is doing now, from
    `agentnow.py`. Idle tabs untouched for 12 hours fold into **Older N**;
    settled tabs into **Settled N**. Hovering a row shows a pencil after its
    name (rename). Each row ends in **⋯**, the same menu as right-click: Rename,

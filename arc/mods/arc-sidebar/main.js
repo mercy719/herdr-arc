@@ -88,6 +88,7 @@ export default class ArcSidebar extends View {
     this.open = { older: false, settled: false };
     this.columns = 4;
     this.pressed = this.over = null;
+    this.tabPressed = this.tabOver = null;
   }
 
   // One line per agent from agentnow.py into shared("agent.now"), for this list.
@@ -112,12 +113,11 @@ export default class ArcSidebar extends View {
 
   async close() { this.closed = true; }
 
-  // Pinned ids, in order; until you unpin one, every project (new ones too).
+  // Pinned ids in Herdr's own space order, which each machine's core keeps, so every client shows the same
+  // order; until you unpin one, every project (new ones too).
   pinned(all) {
-    const ids = new Set(all.map((s) => s.id));
     const kept = shared("arc.pinned");
-    if (Array.isArray(kept)) return kept.filter((id) => ids.has(id));
-    return all.map((s) => s.id);
+    return all.filter((s) => !Array.isArray(kept) || kept.includes(s.id)).map((s) => s.id);
   }
 
   togglePin(id, all) {
@@ -132,12 +132,10 @@ export default class ArcSidebar extends View {
     return order.indexOf(this.pressed) < order.indexOf(target);
   }
 
+  // space.move's index counts every space and stays within the space's machine; taking the target's place lands
+  // after a target dragged forward onto and before one dragged back onto, as dragForward's line shows.
   move(all, from, target) {
-    const order = this.pinned(all);
-    const forward = order.indexOf(from) < order.indexOf(target);
-    const next = order.filter((id) => id !== from);
-    next.splice(next.indexOf(target) + (forward ? 1 : 0), 0, from);
-    setShared("arc.pinned", next);
+    run("space.move", { id: from, index: all.findIndex((s) => s.id === target) + 1 });
   }
 
   statusDot(t, status, size = 8) {
@@ -242,12 +240,17 @@ export default class ArcSidebar extends View {
   // One block of tiles per machine (this computer first) once there are several.
   grid(t, pinnedSpaces, all) {
     if (!multiDevice(all)) return v_flex().gap(4).children(this.rows(t, pinnedSpaces, all));
-    const groups = new Map([[null, []]]);
+    const found = new Map([[null, []]]);
     for (const s of pinnedSpaces) {
       const m = s.machine ?? null;
-      if (!groups.has(m)) groups.set(m, []);
-      groups.get(m).push(s);
+      if (!found.has(m)) found.set(m, []);
+      found.get(m).push(s);
     }
+    // Each client calls itself "local", so machines go in the layout's machineOrder (device names, the same list on
+    // every computer) rather than this-computer-first; ones it doesn't name follow in Herdr's order.
+    const order = props()?.machineOrder ?? [];
+    const rank = (m) => { const i = order.indexOf(deviceName(m)); return i < 0 ? order.length : i; };
+    const groups = [...found].sort((a, b) => rank(a[0]) - rank(b[0]));
     const folded = shared("arc.folded") ?? [];
     const blocks = [];
     for (const [m, list] of groups) {
@@ -295,6 +298,7 @@ export default class ArcSidebar extends View {
       .hover((st) => st.bg(tab.active ? t.background : t.hover)).cursor_pointer()
       .tooltip(`${tab.name}${tab.status ? " · " + label(tab.status) : ""}${doing ? " · " + doing : ""} (${W().pinHint})`)
       .on_click(() => run("tab.select", { id: tab.id }))
+      .when(pinned, (el) => this.pinDrag(el, t, s, tab, byTab))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.tabMenu(tab, agent); })
       .on_hover((on, cx) => { if (on) this.hoverTab = tab.id; else if (this.hoverTab === tab.id) this.hoverTab = null; cx.notify(); })
       .child(lead)
@@ -313,9 +317,35 @@ export default class ArcSidebar extends View {
       .child(this.rowAction(t, tab, agent));
   }
 
+  // Pinned rows reorder by dragging one onto another of the same project; Herdr keeps the order (tab.move),
+  // so it holds on every client. A plain click still selects (a drag ends on another row, so it isn't a click).
+  pinDrag(el, t, s, tab, byTab) {
+    const at = (id) => s.tabs.findIndex((x) => x.id === id);
+    const forward = this.tabPressed && at(this.tabPressed) < at(tab.id);
+    return el.relative()
+      .when(this.tabPressed === tab.id && this.tabOver && this.tabOver !== tab.id, (r) => r.opacity(0.45))
+      .when(Boolean(this.tabPressed) && this.tabOver === tab.id && this.tabPressed !== tab.id, (r) => r.child(
+        div().absolute().left(6).right(6).h(2).rounded(1).bg(t.accent)
+          .when(forward, (line) => line.bottom(-1)).when(!forward, (line) => line.top(-1))))
+      .on_mouse_down("left", () => { this.tabPressed = tab.id; this.tabOver = tab.id; })
+      .on_mouse_move((_e, cx) => {
+        if (!this.tabPressed) return;
+        const over = at(this.tabPressed) >= 0 && byTab[this.tabPressed]?.pinned ? tab.id : null;
+        if (this.tabOver !== over) { this.tabOver = over; cx.notify(); }
+      })
+      .on_mouse_up("left", (_e, cx) => {
+        const from = this.tabPressed, over = this.tabOver;
+        this.tabPressed = this.tabOver = null;
+        // index is 1-based over all the project's tabs; landing on the target's place puts it after a row
+        // dragged down onto, and before one dragged up onto, matching the line shown.
+        if (from && over === tab.id && from !== tab.id) run("tab.move", { id: from, index: at(tab.id) + 1 });
+        cx.notify();
+      });
+  }
+
   tabMenu(tab, agent) {
     openTabMenu({ id: tab.id, settled: tab.settled, address: agent?.app === "claude-code" ? agent.address : null,
-      resumable: Boolean(shared("agent.resumable")?.[tab.id]) });
+      resumable: Boolean(shared("agent.resumable")?.[tab.id]), agent: agent?.address ?? null, pinned: Boolean(agent?.pinned) });
   }
 
   // One button per row: a spinner while an op runs, otherwise ⋯ for the row menu (same as right-click).

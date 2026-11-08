@@ -10,9 +10,9 @@ export const ICONS_DIR = "mods/arc-sidebar/icons";
 
 const WORDS = {
   en: { restart: "Restart agent", stopAgent: "Close agent (keep terminal)", resume: "Resume conversation",
-    settle: "Settle", putBack: "Put back in the list", deleteTab: "Delete terminal", rename: "Rename", pin: "Pin", unpin: "Unpin", icon: "Change icon…", resetIcon: "Default icon", close: "Close project", prompt: "Pick an image for this project" },
+    settle: "Settle", putBack: "Put back in the list", deleteTab: "Delete terminal", fix: "Pin to top", unfix: "Unpin", rename: "Rename", pin: "Pin", unpin: "Unpin", icon: "Change icon…", resetIcon: "Default icon", close: "Close project", prompt: "Pick an image for this project" },
   zh: { restart: "重启 Agent", stopAgent: "关闭 Agent（保留终端）", resume: "恢复对话",
-    settle: "收起", putBack: "放回列表", deleteTab: "删除终端", rename: "重命名", pin: "置顶", unpin: "取消置顶", icon: "换图标…", resetIcon: "恢复默认图标", close: "关闭项目", prompt: "选一张图片作为项目图标" },
+    settle: "收起", putBack: "放回列表", deleteTab: "删除终端", fix: "固定", unfix: "取消固定", rename: "重命名", pin: "置顶", unpin: "取消置顶", icon: "换图标…", resetIcon: "恢复默认图标", close: "关闭项目", prompt: "选一张图片作为项目图标" },
 };
 const W = () => WORDS[props()?.lang] ?? WORDS.en;
 
@@ -20,9 +20,10 @@ export function openMenu(space) {
   openOverlay({ mod: "arc-sidebar", kind: "popup", width: 190, height: 220, props: { menuFor: space.id, lang: props()?.lang } });
 }
 
-// The right-click menu for a session row: tab = { id, settled, address (a running agent), resumable }.
+// The right-click menu for a session row: tab = { id, settled, address (a running Claude Code), resumable,
+// agent (any agent's terminal, for pinning), pinned }.
 export function openTabMenu(tab) {
-  const rows = (tab.address ? 2 : 0) + (tab.resumable ? 1 : 0) + 3;
+  const rows = (tab.agent ? 1 : 0) + (tab.address ? 2 : 0) + (tab.resumable ? 1 : 0) + 3;
   openOverlay({ mod: "arc-sidebar", kind: "popup", width: 210, height: rows * 31 + 29, props: { tabMenu: tab, lang: props()?.lang } });
 }
 
@@ -60,6 +61,9 @@ function renderTabMenu(t) {
   const tab = props().tabMenu;
   return menuList(t, [
     [W().rename, "square-pen", () => run("tab.rename", { id: tab.id })],
+    // Herdr keeps the pin with the terminal, so every client (the phone too) shows it on top.
+    ...(tab.agent ? [[tab.pinned ? W().unfix : W().fix, tab.pinned ? "pin-off" : "pin",
+      () => run("terminal.pin", { terminal: tab.agent, pinned: !tab.pinned })]] : []),
     ...(tab.address ? [[W().restart, GLYPH("rotate-cw"), () => askOp("restart", tab)],
       [W().stopAgent, GLYPH("power"), () => askOp("stop", tab)]] : []),
     ...(tab.resumable ? [[W().resume, GLYPH("history"), () => askOp("resume", tab)]] : []),
