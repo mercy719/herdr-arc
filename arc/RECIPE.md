@@ -99,9 +99,37 @@ The `main` layout with its left sidebar replaced, top to bottom:
 - `mods/arc-sidebar`: `main.js` (the sidebar), `menu.js` (the right-click
   popup, a copy of this mod opened with `openOverlay`, and the icon picker),
   `agentnow.py`, `agentctl.py` (close / resume / restart). Icons from the
-  shipped `mods/workspace-chrome/*.svg`, plus `glyphs/` (lucide, ISC).
+  shipped `mods/workspace-chrome/*.svg`, plus `glyphs/` (Lucide, ISC; the
+  CPU / memory / SSD glyphs are Phosphor, MIT). `machstat.py` reads each
+  machine's CPU, memory and SSD for its header.
+- `mods/arc-board`: the side-panel board (`main.js`) and `boardnow.py`, which
+  reads the space's conversations through `agentnow.py`, asks the model for
+  the board's JSON, and lists PRs with `gh`. Icons: Phosphor (MIT) in `ph/`.
+- `mods/arc-tabs`: the shipped tab bar plus a **Board** button for the panel.
 - `mods/arc-chrome`: the shipped `workspace-chrome` header plus a +.
 - `tests/`: `python3 -m unittest discover -s tests`.
+
+## Board
+
+A right-hand panel (the **Board** button in the tab bar) answers "what is this
+project / conversation waiting on". Switch between *this conversation* and
+*this project* at the top. Blocks, top to bottom:
+
+- **Waiting on you**: what agents stopped to ask, decision (red) or a hand
+  you need to lend (amber), with how long it has waited. A decision shows the
+  agent's options as buttons, its pick marked ★. A click waits 3 s (a bar
+  counts down, *Undo* cancels), then `hc send`s that one reply into the
+  session that asked. It works while the session is busy: claude takes it on
+  its next turn.
+- **Next**: one line, with an ETA when the record has one.
+- **PR**: each PR as code → tests → review → merged → packaged, from `gh`.
+  If the space folder isn't a repo (an agent started in `~/Documents` that
+  `cd`s into one), the repo is found from the paths in its recent tool calls.
+- **Can it ship / Done**: per piece of work, ok / not yet / needs your look.
+
+It reruns the model when an agent stops, and every 5 min only if the
+conversation changed. Labels are Chinese for now.
+`data/arc-board/<space id>.json` can reorder or replace the blocks.
 
 ## Watch out
 
@@ -112,6 +140,11 @@ The `main` layout with its left sidebar replaced, top to bottom:
   environment), model `MODEL` at the top of the file (`deepseek-v4.1-flash`,
   for a gateway that routes it). Change `MODEL` to one your endpoint serves,
   or the grey lines stay empty; nothing else breaks.
+- **The board sends more.** `boardnow.py` sends the last few assistant replies
+  of each conversation in the space (up to ~14,000 characters) to the same
+  endpoint and model, whenever an agent stops. Results are cached in
+  `~/.cache/herdr-agent-board/arc-board.json`.
+- **Board buttons type into sessions.** Only after you click and the 3 s pass.
 - It never reads `~/.claude/sessions/*.key`. Only the row menu types into terminals, and only after you drag or click.
 - `hc send` always wraps text in an `<hc from=…>` note, which claude reads as
   a message and a shell can't parse; that is why close is a signal and resume
@@ -138,7 +171,9 @@ The `main` layout with its left sidebar replaced, top to bottom:
 - Each agent row has a grey "doing now" line within a minute.
 - Dragging a tile reorders it; right-click offers rename, pin and icon.
 - Restart from a row's ⋯ brings the same conversation back in the same terminal.
-- `"lang": "zh"` switches every word to Chinese.
+- `"lang": "zh"` switches every word to Chinese (the board is Chinese only).
+- **Board** opens the panel; an agent that asks "A or B?" shows two buttons
+  there within a minute of stopping, and clicking one types the reply into it.
 
 ## Logos
 
@@ -151,7 +186,7 @@ missing image as blank, not as the fallback.
 ## Install
 
 Copy `layouts/arc.json` and `mods/` into `~/.config/herdr-app/`, run
-`herdr-app check mods/arc-sidebar`, then `herdr-app do layout.switch
+`herdr-app check` on `mods/arc-sidebar`, `mods/arc-board` and `mods/arc-tabs`, then `herdr-app do layout.switch
 '{"name":"arc"}'` (or `ctrl-shift-l`). The last layout you used is the one
 Herdr opens with.
 

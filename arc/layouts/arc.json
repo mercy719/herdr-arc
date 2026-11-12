@@ -84,7 +84,10 @@
               "type": "block",
               "window_drag": true,
               "content": {
-                "mod": "tabs"
+                "mod": "arc-tabs",
+                "props": {
+                  "lang": "en"
+                }
               }
             }
           ]
@@ -158,6 +161,13 @@
                       "type": "block",
                       "content": {
                         "mod": "changes"
+                      }
+                    },
+                    {
+                      "id": "board",
+                      "type": "block",
+                      "content": {
+                        "mod": "arc-board"
                       }
                     }
                   ]

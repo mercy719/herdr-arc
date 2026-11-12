@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What each Claude Code agent is doing right now, for Herdr's sidebar.
+"""What each Claude Code agent is doing right now, for Herdr's sidebar and board.
 
 Prints one JSON object to stdout; the shape is in CONTRACT.md.
 Runs as `python3 -I -S agentnow.py` (standard library only).
@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -80,7 +81,7 @@ SHORT_PARAM = ("file_path", "command", "description", "pattern")
 
 
 def parse_tail(data, truncated):
-    """The bits of a conversation the sidebar uses. Half a first line is dropped."""
+    """The bits of a conversation the board shows. Half a first line is dropped."""
     out = {"last_prompt": None, "last_text": None, "tools": [], "tasks": [], "origin": None}
     if not data:
         return out
@@ -223,7 +224,7 @@ def find_transcript(home, cwd, sid, machine):
 
 
 def inspect(machine, address, homes):
-    """Everything the sidebar knows about one terminal beyond what hc ls said."""
+    """Everything the board knows about one terminal beyond what hc ls said."""
     code, out = run_hc(["get", address, "--json"])
     if code != 0:
         return None
@@ -363,8 +364,44 @@ def call_model(activity, base=None, token=None, model=MODEL, timeout=LLM_TIMEOUT
             return phrase_of(r.read())
     except urllib.error.HTTPError as e:
         return REFUSED if e.code in (403, 404) else None
-    except Exception:
-        return None
+    except Exception as e:
+        if "SSL" not in str(getattr(e, "reason", e)):
+            return None
+        # Python's CA bundle can miss a chain the macOS keychain trusts (seen behind a local proxy); curl uses the keychain.
+        text, why = curl_post(base + "/v1/messages", body, token, timeout)
+        if text is None:
+            return REFUSED if re.search(r"error: 40[34]\b", why) else None
+        return phrase_of(text.encode("utf-8"))
+
+
+def curl_post(url, body, token, timeout):
+    """(response text, "") or (None, why). The token goes in a 0600 config file, never on the command line."""
+
+    fd, conf = tempfile.mkstemp(prefix="arc-board-", suffix=".curl")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            q = lambda v: '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            f.write("url = %s\n" % q(url))
+            for h in ["content-type: application/json", "x-api-key: " + token,
+                      "authorization: Bearer " + token, "anthropic-version: 2023-06-01"]:
+                f.write("header = %s\n" % q(h))
+        r = subprocess.run(["/usr/bin/curl", "-sS", "--fail-with-body", "--max-time", str(int(max(1, timeout))),
+                            "-K", conf, "--data-binary", "@-"], input=body, capture_output=True, timeout=timeout + 5)
+        if r.returncode != 0:
+            return None, (r.stderr.decode("utf-8", "replace").strip() or "curl %d" % r.returncode)[:80]
+        return r.stdout.decode("utf-8", "replace"), ""
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, str(e)[:80]
+    finally:
+        try:
+            os.unlink(conf)
+        except OSError:
+            pass
+
+
+
+
+PREFERRED_MODEL = "claude-haiku-5-5"  # the user's pick for board summaries; gateways without it fall through
 
 
 def model_path():
@@ -439,7 +476,7 @@ def save_cache(agents):
             json.dump({"agents": agents}, f, ensure_ascii=False)
         os.replace(tmp, path)
     except OSError:
-        pass  # a sidebar that can't cache still shows what it has
+        pass  # a board that can't cache still shows what it has
 
 
 # --- main ---------------------------------------------------------------------
