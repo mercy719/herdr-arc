@@ -20,6 +20,8 @@ const LOGOS = {};
 // Tiles stay about this wide; the column count follows the sidebar width.
 // agentnow.py (beside this file) says what each agent is doing; it is rerun this often.
 const NOW_EVERY_S = 20;
+// machstat.py (beside this file) reads each machine's CPU and memory for its header; rerun this often.
+const STAT_EVERY_S = 10;
 // Done is green across the sidebar; the theme's ansi green reads grey at dot size.
 const DONE_GREEN = "#34c759";
 // agentnow.py marks an agent whose latest turn was a scheduled wakeup.
@@ -52,7 +54,7 @@ const WORDS = {
     newSession: "New session in this project",
     older: (n) => `Older ${n}`, olderHint: "Idle sessions quiet for 12 hours, only folded, not settled",
     settled: (n) => `Settled ${n}`, settledHint: "Settled sessions keep running; open to put them back",
-    others: (n) => `Other projects ${n}`, thisComputer: "This computer", fold: "Fold", unfold: "Unfold",
+    others: (n) => `Other projects ${n}`, thisComputer: "This computer", fold: "Fold", unfold: "Unfold", mem: "Memory", free: "free",
     ago: (ms) => ms < 60e3 ? "now" : ms < 3600e3 ? `${Math.floor(ms / 60e3)}m ago` : ms < 86400e3 ? `${Math.floor(ms / 3600e3)}h ago` : `${Math.floor(ms / 86400e3)}d ago`,
   },
   zh: {
@@ -63,7 +65,7 @@ const WORDS = {
     newSession: "在这个项目里新开会话",
     older: (n) => `较早 ${n}`, olderHint: "超过 12 小时没动静的空闲会话，只是折叠显示，不会被收起",
     settled: (n) => `已收起 ${n}`, settledHint: "收起的会话还在运行，点开可以放回列表",
-    others: (n) => `其他项目 ${n}`, thisComputer: "本机", fold: "折叠", unfold: "展开",
+    others: (n) => `其他项目 ${n}`, thisComputer: "本机", fold: "折叠", unfold: "展开", mem: "内存", free: "剩",
     ago: (ms) => ms < 60e3 ? "刚刚" : ms < 3600e3 ? `${Math.floor(ms / 60e3)} 分钟前` : ms < 86400e3 ? `${Math.floor(ms / 3600e3)} 小时前` : `${Math.floor(ms / 86400e3)} 天前`,
   },
 };
@@ -85,6 +87,7 @@ export default class ArcSidebar extends View {
     watchIconPicks(this, cx);
     watchAgentOps(this, cx);
     this.watchNow(cx);
+    this.watchStat(cx);
     this.open = { older: false, settled: false };
     this.columns = 4;
     this.pressed = this.over = null;
@@ -109,6 +112,30 @@ export default class ArcSidebar extends View {
         await exec("sleep", [String(NOW_EVERY_S)]).catch(() => null);
       }
     });
+  }
+
+  // Each machine's CPU, memory and SSD from machstat.py into shared("arc.stat"), keyed like arc.folded ("local", "cn").
+  watchStat(cx) {
+    const script = `${appHome()}/mods/arc-sidebar/machstat.py`;
+    cx.spawn(async () => {
+      while (!this.closed) {
+        const r = await exec("python3", ["-I", "-S", script]).catch(() => null);
+        if (this.closed) return;
+        if (r?.code === 0) {
+          try { setShared("arc.stat", JSON.parse(r.stdout).machines ?? {}); } catch { /* keep the last numbers */ }
+        }
+        await exec("sleep", [String(STAT_EVERY_S)]).catch(() => null);
+      }
+    });
+  }
+
+  // Compact reading: a flat Phosphor glyph tinted grey / orange from `warn` % / red from `crit` %, then the number,
+  // so the machine name keeps its room. macOS keeps memory ~70 % full by design.
+  meter(t, icon, label, pct, warn = 70, crit = 90) {
+    const color = pct >= crit ? "#e5484d" : pct >= warn ? "#e3814f" : t.dim;
+    return h_flex().flex_none().gap(2).items_center().text_size(10).accessibility_label(`${label} ${pct}%`)
+      .child(svg(GLYPH(icon)).size(12).flex_none().text_color(color))
+      .child(div().text_color(color).child(String(pct)));
   }
 
   async close() { this.closed = true; }
@@ -263,6 +290,7 @@ export default class ArcSidebar extends View {
       const blocked = mine.filter((a) => a.status === "blocked").length;
       const done = mine.filter((a) => a.status === "done").length;
       const n = blocked || done;
+      const stat = (shared("arc.stat") ?? {})[key];
       const head = h_flex().id(`device-${key}`).h(20).px(2).gap(5).items_center().rounded(5).text_size(11).text_color(t.dim)
         .hover((st) => st.bg(t.hover).text_color(t.foreground)).cursor_pointer()
         .tooltip(shut ? W().unfold : W().fold).accessibility_label(`${deviceName(m)} ${shut ? W().unfold : W().fold}`)
@@ -271,6 +299,10 @@ export default class ArcSidebar extends View {
         .child(svg(deviceIcon(m)).size(11).flex_none())
         .child(div().truncate().child(deviceName(m)))
         .child(div().child(String(list.length)))
+        .when(Boolean(stat), (el) => el.child(div().flex_1()).child(h_flex().flex_none().gap(8).items_center()
+          .tooltip(`CPU ${stat.cpu}% · ${W().mem} ${stat.used_gb} / ${stat.total_gb} GB` + (stat.disk == null ? "" : ` · SSD ${W().free} ${stat.free_gb} GB`))
+          .child(this.meter(t, "cpu", "CPU", stat.cpu)).child(this.meter(t, "memory", W().mem, stat.mem, 85, 95))
+          .when(stat.disk != null, (row) => row.child(this.meter(t, "hard-drive", "SSD", stat.disk, 85, 95)))))
         .when(shut && n > 0, (el) => el.child(h_flex().h(14).min_w(14).px(n > 9 ? 3 : 0).rounded_full()
           .bg(blocked ? t.blocked : (t.success ?? DONE_GREEN)).items_center().justify_center().text_size(9).font_bold().text_color("#ffffff").child(String(n))));
       blocks.push(v_flex().gap(4).child(head).when(!shut, (el) => el.children(this.rows(t, list, all))));
